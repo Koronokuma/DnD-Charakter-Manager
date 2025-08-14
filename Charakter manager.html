@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>D&D Charakter-Manager</title>
+  <style>
+    :root{ --accent:#9b1c1c; --border:#9b1c1c; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; transition: background .25s,color .25s; }
+    header{ display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:2px solid var(--border); }
+    h1{ margin:0; color:var(--accent); font-size:20px; }
+    nav{ display:flex; gap:8px; }
+    nav button{ padding:6px 10px; border:1px solid var(--border); background:transparent; color:inherit; cursor:pointer; border-radius:8px; }
+    nav button.active{ background: rgba(155,28,28,.15); }
+    .page{ display:none; padding:16px; }
+    .page.active{ display:block; }
+    .row{ display:flex; gap:12px; flex-wrap:wrap; }
+    .col{ flex:1 1 300px; }
+    .card{ border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px; }
+    .btn{ padding:6px 10px; border:1px solid var(--border); background:transparent; color:inherit; cursor:pointer; border-radius:8px; }
+    .btn:disabled{ opacity:.5; cursor:not-allowed; }
+    .muted{ opacity:.8; }
+    .badge{ display:inline-block; border:1px solid var(--border); border-radius:9999px; padding:2px 8px; font-size:.75rem; margin-left:6px; }
+    .cantrip{ border-color:#107a2b; color:#107a2b; }
+    .bonus{ border-color:#3b4fd1; color:#3b4fd1; }
+    input[type="number"], input[type="text"], select { background: transparent; color: inherit; border:1px solid var(--border); padding:6px 8px; border-radius:8px; }
+    .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .nowrap{ white-space:nowrap; }
+    .spells-list{ max-height:60vh; overflow:auto; }
+    /* Themes */
+    body.dark{ background:#0d0d0d; color:#fff; }
+    body.light{ background:#f5f5f5; color:#111; }
+    body.parchment{ background:#f4e2c2; color:#3b2f1e; }
+    body.light .card{ background:#fff; }
+    body.parchment .card{ background:rgba(255,255,255,.6); }
+    /* Modal */
+    .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.6); padding:16px; }
+    .modal.open{ display:flex; }
+    .modal .panel{ background:#fff; color:#111; border-radius:12px; padding:16px; width:min(720px, 96vw); max-height:90vh; overflow:auto; }
+    .panel h3{ margin-top:0; }
+    /* Progress */
+    .progress{ border:1px solid var(--border); height:10px; border-radius:9999px; overflow:hidden; }
+    .progress>div{ height:100%; background:var(--accent); width:0%; transition: width .2s ease-in-out; }
+    /* By Koro */
+    .by-koro{ position:fixed; right:10px; bottom:6px; font-size:.8rem; color:rgba(255,255,255,.6); pointer-events:none; user-select:none; }
+    body.light .by-koro{ color:rgba(0,0,0,.5); }
+    body.parchment .by-koro{ color:#5a4a32; opacity:.7; }
+  </style>
+</head>
+<body class="dark">
+  <header>
+    <div>
+      <h1>D&D Charakter-Manager</h1>
+      <div class="muted" id="charMeta">Klasse: – • Stufe: 1</div>
+    </div>
+    <nav>
+      <button data-page="main" class="active">Main</button>
+      <button data-page="spells">Spells</button>
+      <button data-page="settings">Settings</button>
+    </nav>
+  </header>
+
+  <div id="main" class="page active"></div>
+  <div id="spells" class="page"></div>
+  <div id="settings" class="page"></div>
+
+  <div id="levelupModal" class="modal"><div class="panel"></div></div>
+  <div class="by-koro">by Koro</div>
+
+  <script>
+    // ===== Helpers & Data =====
+    const ABILITIES = ["STR","DEX","CON","INT","WIS","CHA"];
+
+    // Vollständige D&D‑Skills mit DE/EN Labels
+    const SKILLS = [
+      { id:"acrobatics",      ability:"DEX", nameEn:"Acrobatics",      nameDe:"Akrobatik" },
+      { id:"animal_handling", ability:"WIS", nameEn:"Animal Handling", nameDe:"Tierkunde" },
+      { id:"arcana",          ability:"INT", nameEn:"Arcana",          nameDe:"Arkana" },
+      { id:"athletics",       ability:"STR", nameEn:"Athletics",       nameDe:"Athletik" },
+      { id:"deception",       ability:"CHA", nameEn:"Deception",       nameDe:"Täuschung" },
+      { id:"history",         ability:"INT", nameEn:"History",         nameDe:"Geschichte" },
+      { id:"insight",         ability:"WIS", nameEn:"Insight",         nameDe:"Motiv erkennen" },
+      { id:"intimidation",    ability:"CHA", nameEn:"Intimidation",    nameDe:"Einschüchtern" },
+      { id:"investigation",   ability:"INT", nameEn:"Investigation",   nameDe:"Nachforschung" },
+      { id:"medicine",        ability:"WIS", nameEn:"Medicine",        nameDe:"Heilkunde" },
+      { id:"nature",          ability:"INT", nameEn:"Nature",          nameDe:"Naturkunde" },
+      { id:"perception",      ability:"WIS", nameEn:"Perception",      nameDe:"Wahrnehmung" },
+      { id:"performance",     ability:"CHA", nameEn:"Performance",     nameDe:"Auftreten" },
+      { id:"persuasion",      ability:"CHA", nameEn:"Persuasion",      nameDe:"Überreden" },
+      { id:"religion",        ability:"INT", nameEn:"Religion",        nameDe:"Religion" },
+      { id:"sleight_of_hand", ability:"DEX", nameEn:"Sleight of Hand", nameDe:"Fingerfertigkeit" },
+      { id:"stealth",         ability:"DEX", nameEn:"Stealth",         nameDe:"Heimlichkeit" },
+      { id:"survival",        ability:"WIS", nameEn:"Survival",        nameDe:"Überleben" },
+    ];
+    const ALL_CLASSES = [
+      { id:"barbarian", name:"Barbar",    hitDie:12, primary:"STR", spellcasting:"none"  },
+      { id:"bard",      name:"Barde",     hitDie: 8, primary:"CHA", spellcasting:"full"  },
+      { id:"cleric",    name:"Kleriker",  hitDie: 8, primary:"WIS", spellcasting:"full"  },
+      { id:"druid",     name:"Druide",    hitDie: 8, primary:"WIS", spellcasting:"full"  },
+      { id:"fighter",   name:"Kämpfer",   hitDie:10, primary:"STR", spellcasting:"third" },
+      { id:"monk",      name:"Mönch",     hitDie: 8, primary:"DEX", spellcasting:"none"  },
+      { id:"paladin",   name:"Paladin",   hitDie:10, primary:"CHA", spellcasting:"half"  },
+      { id:"ranger",    name:"Waldläufer",hitDie:10, primary:"WIS", spellcasting:"half"  },
+      { id:"rogue",     name:"Schurke",   hitDie: 8, primary:"DEX", spellcasting:"none"  },
+      { id:"sorcerer",  name:"Hexenblutmagier", hitDie: 6, primary:"CHA", spellcasting:"full" },
+      { id:"warlock",   name:"Hexenmeister",    hitDie: 8, primary:"CHA", spellcasting:"pact" },
+      { id:"wizard",    name:"Zauberer",  hitDie: 6, primary:"INT", spellcasting:"full"  },
+    ];
+    const FULL_SLOTS = {
+      1:[2], 2:[3], 3:[4,2], 4:[4,3], 5:[4,3,2],
+      6:[4,3,3], 7:[4,3,3,1], 8:[4,3,3,2], 9:[4,3,3,3,1],
+      10:[4,3,3,3,2], 11:[4,3,3,3,2,1], 12:[4,3,3,3,2,1],
+      13:[4,3,3,3,2,1,1], 14:[4,3,3,3,2,1,1], 15:[4,3,3,3,2,1,1,1],
+      16:[4,3,3,3,2,1,1,1], 17:[4,3,3,3,2,1,1,1,1], 18:[4,3,3,3,3,1,1,1,1],
+      19:[4,3,3,3,3,2,1,1,1], 20:[4,3,3,3,3,2,2,1,1]
+    };
+    const HALF_SLOTS = {
+      1:[], 2:[2], 3:[3], 4:[3], 5:[4,2],
+      6:[4,2], 7:[4,2], 8:[4,2,2], 9:[4,2,2], 10:[4,2,2],
+      11:[4,3,2], 12:[4,3,2], 13:[4,3,2,1], 14:[4,3,2,1], 15:[4,3,2,1],
+      16:[4,3,3,1], 17:[4,3,3,1], 18:[4,3,3,2], 19:[4,3,3,2], 20:[4,3,3,2]
+    };
+    const THIRD_SLOTS = {
+      1:[],2:[],3:[2],4:[3],5:[3],6:[3],7:[4,2],8:[4,2],9:[4,2],10:[4,3],
+      11:[4,3],12:[4,3],13:[4,3,2],14:[4,3,2],15:[4,3,2],16:[4,3,3],
+      17:[4,3,3],18:[4,3,3],19:[4,3,3,1],20:[4,3,3,1]
+    };
+    const PACT_SLOTS = { 1:[1],2:[2],3:[2],4:[2],5:[2],6:[2],7:[2],8:[2],9:[2],10:[2], 11:[3],12:[3],13:[3],14:[3],15:[3],16:[3],17:[4],18:[4],19:[4],20:[4] };
+
+    const el = id => document.getElementById(id);
+    const clamp = (n,min,max)=>Math.max(min,Math.min(max,n));
+    const mod = score => Math.floor((score-10)/2);
+    const d = sides => Math.floor(Math.random()*sides)+1;
+    const profBonus = level => Math.ceil(level/4)+1;
+    function getSlotsFor(ch){
+      const cls = ALL_CLASSES.find(c=>c.id===ch.classId);
+      const lvl = Math.max(1, Math.min(20, parseInt(ch.level||1)));
+      if(!cls) return [];
+      switch(cls.spellcasting){
+        case "full":  return FULL_SLOTS[lvl]  || [];
+        case "half":  return HALF_SLOTS[lvl]  || [];
+        case "third": return THIRD_SLOTS[lvl] || [];
+        case "pact":  return PACT_SLOTS[lvl]  || [];
+        default:      return [];
+      }
+    }
+    function skillLabel(sk){ return (settings && settings.lang==="de") ? (sk.nameDe||sk.nameEn||sk.id) : (sk.nameEn||sk.nameDe||sk.id); }
+
+    // ===== State & Persistence =====
+    let settings = { lang:"de", theme:"dark" };
+    let character = {
+      name:"Ari Sturmwind",
+      classId:"wizard",
+      level:1,
+      ac:12,
+      hpMax:8,
+      hp:8,
+      abilities: {STR:8, DEX:14, CON:14, INT:16, WIS:12, CHA:10},
+      usedSlots:{},             // {1: used, 2: used, pact: used}
+      spellsKnown:[],           // IDs
+      spellsPrepared:[],        // IDs (ohne Cantrips/Bonus)
+      bonusSpells:[],           // IDs (immer vorbereitet)
+      proficiencySkills:[],     // Skill-IDs mit Proficiency
+      proficiencySaves:[]       // ABILITIES mit Proficiency
+    };
+    let allSpells = [];
+
+    function saveAll(){ localStorage.setItem("dnd_settings_v1", JSON.stringify(settings)); localStorage.setItem("dnd_character_v1", JSON.stringify(character)); }
+    function loadAll(){ try{ const s=JSON.parse(localStorage.getItem("dnd_settings_v1")||"{}"); const c=JSON.parse(localStorage.getItem("dnd_character_v1")||"{}"); settings={...settings,...s}; character={...character,...c}; }catch{} }
+    function applyTheme(){ document.body.className = settings.theme || "dark"; }
+    function renderMeta(){
+      const cls = ALL_CLASSES.find(c=>c.id===character.classId);
+      el("charMeta").textContent = `Klasse: ${cls?cls.name:"–"} • Stufe: ${character.level}`;
+      const pb = profBonus(character.level); const pbel = el("profBonus"); if(pbel) pbel.textContent = (pb>=0?"+":"")+pb;
+      const lvlEl = el("charLevel"); if(lvlEl) lvlEl.textContent = character.level;
+    }
+
+    // ===== Main Page =====
+    function buildMainPage(){
+      const root = el("main");
+      root.innerHTML = `
+        <div class="row">
+          <div class="col">
+            <div class="card">
+              <h2 style="margin-top:0">Charakter</h2>
+              <div class="grid2">
+                <label>Name <br/><input id="charName" /></label>
+                <label>Klasse <br/><select id="charClass"></select></label>
+                <label>Level <br/><span id="charLevel">1</span> <button class="btn" id="btnOpenLevelUp">Level Up</button></label>
+                <label>AC <br/><input id="charAC" type="number" /></label>
+                <label>HP (max) <br/><input id="charHPMax" type="number" /></label>
+                <label>HP (aktuell) <br/><input id="charHP" type="number" /></label>
+                <div>Proficiency Bonus<br/><span id="profBonus">+2</span></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>Würfel-Log</h3>
+              <div id="diceLog" style="max-height:180px; overflow:auto; font-size:.92rem;"></div>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="card">
+              <h3>Ability Scores</h3>
+              <div id="abilities"></div>
+            </div>
+            <div class="card">
+              <h3>Saving Throws</h3>
+              <div id="saves"></div>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="card">
+              <h3>Skills</h3>
+              <div id="skills"></div>
+            </div>
+          </div>
+        </div>
+      `;
+      el("charName").value = character.name;
+      el("charAC").value = character.ac;
+      el("charHPMax").value = character.hpMax;
+      el("charHP").value = character.hp;
+
+      const sel = el("charClass");
+      sel.innerHTML = ALL_CLASSES.map(c=>`<option value="${c.id}">${c.name}</option>`).join("");
+      sel.value = character.classId;
+
+      renderMeta();
+
+      el("charName").addEventListener("input", e=>{ character.name=e.target.value; saveAll(); renderMeta(); });
+      el("charAC").addEventListener("input", e=>{ character.ac=parseInt(e.target.value||"10"); saveAll(); });
+      el("charHPMax").addEventListener("input", e=>{ character.hpMax=parseInt(e.target.value||"1"); saveAll(); });
+      el("charHP").addEventListener("input", e=>{ character.hp=parseInt(e.target.value||"1"); saveAll(); });
+      sel.addEventListener("change", e=>{ character.classId=e.target.value; saveAll(); renderMeta(); renderSpellSlots(); filterAndRenderAvailable(); updatePrepInfo(); });
+      el("btnOpenLevelUp").addEventListener("click", openLevelUp);
+
+      renderAbilities(); renderSaves(); renderSkills();
+    }
+    function rollCheck(label, bonus){
+      const r=d(20); const total=r+bonus; const nat20=r===20?" 🎉 NAT 20!":""; const nat1=r===1?" 💀 NAT 1!":"";
+      const log=el("diceLog"); if(log) log.innerHTML=`<div>${label}: ${r} ${bonus>=0?"+":""}${bonus} = <b>${total}</b>${nat20}${nat1}</div>`+log.innerHTML;
+    }
+    function renderAbilities(){
+      const cont=el("abilities"); if(!cont) return; cont.innerHTML="";
+      ABILITIES.forEach(ab=>{
+        const score=character.abilities[ab]; const m=mod(score);
+        const row=document.createElement("div");
+        row.innerHTML = `
+          ${ab}: <input type="number" value="${score}" style="width:64px"
+            oninput="character.abilities['${ab}']=parseInt(this.value||'10'); saveAll(); renderAbilities(); renderSaves(); renderSkills(); updatePrepInfo();" />
+          (Mod: ${m>=0?"+":""}${m})
+          <button class="btn" onclick="rollCheck('${ab}', ${m})">Würfeln</button>`;
+        cont.appendChild(row);
+      });
+    }
+    // NEW: saves berücksichtigen proficiencySaves
+    function renderSaves(){
+      const cont=el("saves"); if(!cont) return; cont.innerHTML="";
+      ABILITIES.forEach(ab=>{
+        const base = mod(character.abilities[ab]);
+        const prof = character.proficiencySaves.includes(ab) ? profBonus(character.level) : 0;
+        const total = base + prof;
+        const row = document.createElement("div");
+        row.innerHTML = `
+          ${ab}: ${total>=0?"+":""}${total}
+          <span class="muted" style="font-size:.85rem">(Mod ${base>=0?"+":""}${base}${prof?` + PB ${prof}`:""})</span>
+          <button class="btn" onclick="rollCheck('${ab} Save', ${total})">Würfeln</button>`;
+        cont.appendChild(row);
+      });
+    }
+    // NEW: skills berücksichtigen proficiencySkills + DE/EN Label
+    function renderSkills(){
+      const cont=el("skills"); if(!cont) return; cont.innerHTML="";
+      SKILLS.forEach(sk=>{
+        const base = mod(character.abilities[sk.ability]);
+        const prof = character.proficiencySkills.includes(sk.id) ? profBonus(character.level) : 0;
+        const total = base + prof;
+        const label = skillLabel(sk);
+        const row=document.createElement("div");
+        row.innerHTML = `
+          ${label} (${sk.ability}): ${total>=0?"+":""}${total}
+          <span class="muted" style="font-size:.85rem">(Mod ${base>=0?"+":""}${base}${prof?` + PB ${prof}`:""})</span>
+          <button class="btn" onclick="rollCheck('${label}', ${total})">Würfeln</button>`;
+        cont.appendChild(row);
+      });
+    }
+
+    // ===== Spells Page =====
+    function buildSpellsPage(){
+      const root=el("spells");
+      root.innerHTML=`
+        <div class="card">
+          <h2 style="margin-top:0">Spell Slots</h2>
+          <div id="spellSlotsContainer"></div>
+          <button class="btn" id="btnLongRest">Lange Rast</button>
+          <div style="margin-top:6px">Vorbereitete Zauber (ohne Cantrips/Bonus): <b id="prepCount">0</b>/<b id="prepLimit">0</b></div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <div class="card">
+              <h3>Verfügbare Zauber</h3>
+              <div class="row" style="align-items:center; margin-bottom:8px">
+                <input id="spellQuery" placeholder="Filter" />
+                <label class="nowrap">Level
+                  <select id="spellLevelFilter">
+                    <option value="all">All</option>
+                    <option value="0">0</option><option value="1">1</option><option value="2">2</option>
+                    <option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                    <option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option>
+                  </select>
+                </label>
+              </div>
+              <div class="progress" id="spellProgress" style="display:none"><div></div></div>
+              <div id="availableSpells" class="spells-list"></div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="card">
+              <h3>Bekannte & vorbereitete Zauber</h3>
+              <div id="knownSpells" class="spells-list"></div>
+            </div>
+          </div>
+        </div>`;
+      el("spellQuery").addEventListener("input", filterAndRenderAvailable);
+      el("spellLevelFilter").addEventListener("change", filterAndRenderAvailable);
+      // LONG REST: setze ALLE verbrauchten Slots explizit auf 0 (inkl. Pakt)
+      el("btnLongRest").addEventListener("click", longRestResetSlots);
+
+      renderSpellSlots(); updatePrepInfo(); fetchAllSpells();
+    }
+    function longRestResetSlots(){
+      const cls = ALL_CLASSES.find(c=>c.id===character.classId);
+      const slots = getSlotsFor(character);
+      const next = {};
+      for(let i=0;i<slots.length;i++) next[i+1]=0; // Stufen 1..n
+      if(cls?.spellcasting==="pact") next.pact = 0; // Warlock
+      character.usedSlots = next;
+      renderSpellSlots(); saveAll();
+    }
+
+    async function fetchAllSpells(){
+      const progress=el("spellProgress"); const bar=progress?progress.firstElementChild:null;
+      const outEl=el("availableSpells");
+      try{
+        if(outEl) outEl.textContent="Lade Zauber…";
+        if(progress) progress.style.display="block"; if(bar) bar.style.width="0%";
+        const res = await fetch("https://www.dnd5eapi.co/api/spells");
+        if(!res.ok) throw new Error(`HTTP ${res.status}`);
+        const list = await res.json();
+        if(!list || !Array.isArray(list.results)) throw new Error("Ungültige API-Antwort");
+        const urls = list.results.map(s=>"https://www.dnd5eapi.co"+s.url);
+        let done=0; const out=[]; const workers=8;
+        async function worker(queue){
+          while(queue.length){
+            const u=queue.shift();
+            try{
+              const r=await fetch(u); if(!r.ok){} const d=await r.json();
+              out.push({ id:d.index, name:d.name, level:d.level, school:d.school?.name||"", classes:(d.classes||[]).map(c=>c.index), desc:Array.isArray(d.desc)?d.desc.join(" "):String(d.desc||"") });
+            }catch{} finally{ done++; if(bar) bar.style.width=((done/urls.length)*100).toFixed(1)+"%"; }
+          }
+        }
+        const q=urls.slice(); await Promise.all(Array.from({length:workers},()=>worker(q)));
+        allSpells = out.sort((a,b)=>(a.level-b.level)||a.name.localeCompare(b.name));
+        if(progress) progress.style.display="none";
+        filterAndRenderAvailable(); renderKnownSpells(); renderSpellSlots(); updatePrepInfo();
+      }catch(e){
+        if(progress) progress.style.display="none";
+        if(outEl) outEl.textContent = "Fehler beim Laden der Zauber: "+(e?.message||e);
+      }
+    }
+    function renderSpellSlots(){
+      const container=el("spellSlotsContainer"); if(!container) return; container.innerHTML="";
+      const cls=ALL_CLASSES.find(c=>c.id===character.classId);
+      const slots=getSlotsFor(character);
+      if(cls?.spellcasting==="pact"){
+        const pactMax=(slots&&slots[0])||0; const used=character.usedSlots.pact||0;
+        container.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center">
+            <div><b>Pakt-Slots</b>: ${used}/${pactMax}</div>
+            <div>
+              <button class="btn" ${used<=0?"disabled":""} onclick="changePactUsed(-1)">–</button>
+              <button class="btn" ${used>=pactMax?"disabled":""} onclick="changePactUsed(1)">+</button>
+            </div>
+          </div>`; return;
+      }
+      if(!slots.length){ container.innerHTML=`<div class="muted">Keine Spell Slots für diese Klasse/Stufe.</div>`; return; }
+      slots.forEach((max,i)=>{
+        const lvl=i+1; const used=character.usedSlots[lvl]||0;
+        const row=document.createElement("div");
+        row.style.display="flex"; row.style.justifyContent="space-between"; row.style.marginBottom="6px";
+        row.innerHTML = `<div><b>Stufe ${lvl}</b>: ${used}/${max}</div>
+          <div>
+            <button class="btn" ${used<=0?"disabled":""} onclick="changeUsedSlot(${lvl},-1)">–</button>
+            <button class="btn" ${used>=max?"disabled":""} onclick="changeUsedSlot(${lvl},1)">+</button>
+          </div>`;
+        container.appendChild(row);
+      });
+    }
+    function changeUsedSlot(lvl, delta){
+      const slots=getSlotsFor(character); const max=slots[lvl-1]||0; const cur=character.usedSlots[lvl]||0;
+      character.usedSlots[lvl]=clamp(cur+delta,0, max); renderSpellSlots(); saveAll();
+    }
+    function changePactUsed(delta){
+      const pactMax=(getSlotsFor(character)[0])||0; const cur=character.usedSlots.pact||0;
+      character.usedSlots.pact=clamp(cur+delta,0,pactMax); renderSpellSlots(); saveAll();
+    }
+    function updatePrepInfo(){
+      const cls=ALL_CLASSES.find(c=>c.id===character.classId);
+      const primary=cls?.primary||"INT";
+      const limit=Math.max(1, mod(character.abilities[primary])+character.level);
+      const count=character.spellsPrepared.filter(id=>{ const sp=allSpells.find(s=>s.id===id); return sp&&sp.level>0&&!character.bonusSpells.includes(id); }).length;
+      const capEl=el("prepLimit"); const cntEl=el("prepCount"); if(capEl) capEl.textContent=limit; if(cntEl) cntEl.textContent=count;
+    }
+    function filterAndRenderAvailable(){
+      const cont=el("availableSpells"); if(!cont) return; cont.innerHTML="";
+      const clsId=character.classId; const q=(el("spellQuery").value||"").toLowerCase(); const lvf=el("spellLevelFilter").value;
+      const list=allSpells.filter(s=>s.classes.includes(clsId));
+      if(!list.length){ cont.innerHTML=`<div class="muted">Keine Zauber für diese Klasse gefunden.</div>`; return; }
+      let filtered=list;
+      if(q) filtered=filtered.filter(s=> s.name.toLowerCase().includes(q) || (s.desc||"").toLowerCase().includes(q));
+      if(lvf!=="all"){ const n=parseInt(lvf); filtered=filtered.filter(s=>s.level===n); }
+      const map=new Map(); for(const sp of filtered){ if(!map.has(sp.level)) map.set(sp.level,[]); map.get(sp.level).push(sp); }
+      const levels=[...map.keys()].sort((a,b)=>a-b); if(levels.length===0){ cont.innerHTML=`<div class="muted">Keine Treffer.</div>`; return; }
+      for(const lvl of levels){
+        const head=document.createElement("div"); head.className="muted"; head.style.margin="6px 0 4px"; head.textContent=lvl===0?"Zaubertricks (Cantrips)":`Stufe ${lvl}`; cont.appendChild(head);
+        map.get(lvl).sort((a,b)=>a.name.localeCompare(b.name)).forEach(sp=>{
+          const row=document.createElement("div");
+          row.style.display="flex"; row.style.justifyContent="space-between"; row.style.alignItems="center"; row.style.borderTop="1px solid var(--border)"; row.style.padding="6px 0";
+          row.innerHTML = `<div><div><b>${sp.name}</b>${sp.level===0?'<span class="badge cantrip">Cantrip</span>':''}</div><div class="muted" style="font-size:.85rem">${sp.school||""}</div></div>
+                           <button class="btn">Hinzufügen</button>`;
+          row.querySelector("button").addEventListener("click", ()=> addKnown(sp.id));
+          cont.appendChild(row);
+        });
+      }
+    }
+    function addKnown(id){ if(!character.spellsKnown.includes(id)) character.spellsKnown.push(id); renderKnownSpells(); saveAll(); }
+    function togglePrepared(id){
+      const sp=allSpells.find(s=>s.id===id); if(!sp) return; if(sp.level===0) return; if(character.bonusSpells.includes(id)) return;
+      const isPrep=character.spellsPrepared.includes(id);
+      if(isPrep){ character.spellsPrepared=character.spellsPrepared.filter(x=>x!==id); }
+      else{
+        const cls=ALL_CLASSES.find(c=>c.id===character.classId); const primary=cls?.primary||"INT";
+        const limit=Math.max(1, mod(character.abilities[primary])+character.level);
+        const preparedBase=character.spellsPrepared.filter(pid=>{ const s2=allSpells.find(s=>s.id===pid); return s2&&s2.level>0&&!character.bonusSpells.includes(pid); }).length;
+        if(preparedBase>=limit){ alert("Vorbereitungs-Limit erreicht."); return; }
+        character.spellsPrepared.push(id);
+      }
+      renderKnownSpells(); updatePrepInfo(); saveAll();
+    }
+    function toggleBonus(id){
+      const set=new Set(character.bonusSpells); set.has(id)?set.delete(id):set.add(id);
+      character.bonusSpells=[...set];
+      character.spellsPrepared=character.spellsPrepared.filter(x=>!set.has(x));
+      renderKnownSpells(); updatePrepInfo(); saveAll();
+    }
+    // NEW: Known-Spell entfernen (räumt prepared/bonus auf)
+    function removeKnown(id){
+      character.spellsKnown    = character.spellsKnown.filter(x=>x!==id);
+      character.spellsPrepared = character.spellsPrepared.filter(x=>x!==id);
+      character.bonusSpells    = character.bonusSpells.filter(x=>x!==id);
+      renderKnownSpells(); updatePrepInfo(); saveAll();
+    }
+    // UPDATED: Buttons inkl. Entfernen und stabile Event-Wires
+    function renderKnownSpells(){
+      const cont=el("knownSpells"); if(!cont) return; cont.innerHTML="";
+      const known=character.spellsKnown.map(id=>allSpells.find(s=>s.id===id)).filter(Boolean)
+        .sort((a,b)=>(a.level-b.level)||a.name.localeCompare(b.name));
+      if(known.length===0){ cont.innerHTML=`<div class="muted">Noch keine Zauber bekannt.</div>`; return; }
+      known.forEach(sp=>{
+        const isPrep=character.spellsPrepared.includes(sp.id);
+        const isBonus=character.bonusSpells.includes(sp.id);
+        const row=document.createElement("div");
+        row.style.borderTop="1px solid var(--border)"; row.style.padding="6px 0";
+        row.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:center">
+          <div><b>${sp.name}</b>${sp.level===0?'<span class="badge cantrip">Cantrip</span>':''}${isBonus?'<span class="badge bonus">Bonus</span>':''}
+              <div class="muted" style="font-size:.85rem">${sp.level===0?"Zaubertrick":"Stufe "+sp.level} • ${sp.school||""}</div>
+          </div>
+          <div style="display:flex; gap:6px; align-items:center">
+            ${sp.level>0 && !isBonus ? `<button class="btn btn-toggle">${isPrep?"Unvorbereiten":"Vorbereiten"}</button>` : ""}
+            ${sp.level>0 ? `<button class="btn btn-bonus">${isBonus?"Bonus entfernen":"Bonus markieren"}</button>` : ""}
+            <button class="btn btn-remove" title="Aus bekannten Zaubern entfernen">Entfernen</button>
+          </div>
+        </div>`;
+        const btnToggle=row.querySelector(".btn-toggle");
+        const btnBonus=row.querySelector(".btn-bonus");
+        const btnRemove=row.querySelector(".btn-remove");
+        if(btnToggle) btnToggle.addEventListener("click", ()=>togglePrepared(sp.id));
+        if(btnBonus)  btnBonus.addEventListener("click",  ()=>toggleBonus(sp.id));
+        if(btnRemove) btnRemove.addEventListener("click", ()=>removeKnown(sp.id));
+        cont.appendChild(row);
+      });
+    }
+
+    // ===== Settings Page =====
+    function buildSettingsPage(){
+      const root=el("settings");
+      root.innerHTML = `
+        <div class="card">
+          <h2 style="margin-top:0">Einstellungen</h2>
+          <div class="grid2">
+            <label>Sprache<br/>
+              <select id="langSelect">
+                <option value="de">Deutsch</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <label>Theme<br/>
+              <select id="themeSelect">
+                <option value="dark">Dunkel</option>
+                <option value="light">Hell</option>
+                <option value="parchment">Pergament</option>
+              </select>
+            </label>
+          </div>
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap">
+            <button class="btn" id="btnReset">Auf Standard zurücksetzen</button>
+          </div>
+        </div>`;
+      const langSel=el("langSelect"); const themeSel=el("themeSelect");
+      langSel.value=settings.lang||"de"; themeSel.value=settings.theme||"dark";
+      langSel.addEventListener("change", ()=>{ settings.lang=langSel.value; saveAll(); renderSkills(); });
+      themeSel.addEventListener("change", ()=>{ settings.theme=themeSel.value; applyTheme(); saveAll(); });
+
+      el("btnReset").addEventListener("click", ()=>{ localStorage.removeItem("dnd_settings_v1"); localStorage.removeItem("dnd_character_v1"); location.reload(); });
+
+      // Proficiency-Karte anfügen
+      buildProficiencyCard();
+    }
+    // NEW: Proficiency-Auswahl (Skills & Saves)
+    function buildProficiencyCard(){
+      const settingsRoot=el("settings"); if(!settingsRoot) return;
+      let card=el("proficiencyCard");
+      if(!card){ card=document.createElement("div"); card.id="proficiencyCard"; card.className="card"; settingsRoot.appendChild(card); }
+      let html=`<h2 style="margin-top:0">Übungsbonus – Auswahl</h2>`;
+      html+=`<div class="grid2"><div><h3>Skills</h3>`;
+      SKILLS.forEach(sk=>{
+        const checked=character.proficiencySkills.includes(sk.id)?"checked":"";
+        const label=skillLabel(sk);
+        html+=`<label style="display:block; margin-bottom:4px;">
+          <input type="checkbox" class="prof-skill" value="${sk.id}" ${checked} />
+          ${label} <span class="muted">(${sk.ability})</span>
+        </label>`;
+      });
+      html+=`</div><div><h3>Rettungswürfe</h3>`;
+      ABILITIES.forEach(ab=>{
+        const checked=character.proficiencySaves.includes(ab)?"checked":"";
+        html+=`<label style="display:block; margin-bottom:4px;">
+          <input type="checkbox" class="prof-save" value="${ab}" ${checked} />
+          ${ab}
+        </label>`;
+      });
+      html+=`</div></div>`;
+      card.innerHTML=html;
+
+      card.querySelectorAll(".prof-skill").forEach(cb=>{
+        cb.addEventListener("change", ()=>{
+          const id=cb.value; const set=new Set(character.proficiencySkills);
+          set.has(id)?set.delete(id):set.add(id);
+          character.proficiencySkills=[...set]; saveAll(); renderSkills();
+        });
+      });
+      card.querySelectorAll(".prof-save").forEach(cb=>{
+        cb.addEventListener("change", ()=>{
+          const ab=cb.value; const set=new Set(character.proficiencySaves);
+          set.has(ab)?set.delete(ab):set.add(ab);
+          character.proficiencySaves=[...set]; saveAll(); renderSaves();
+        });
+      });
+    }
+
+    // ===== Level-Up Modal =====
+    function buildLevelUpModal(){
+      const panel=document.querySelector("#levelupModal .panel");
+      panel.innerHTML=`
+        <h3>Level Up</h3>
+        <div class="grid2">
+          <div class="card">
+            <div>Aktuelles Level: <b id="curLevel">1</b></div>
+            <div>Neues Level: <b id="newLevel">2</b></div>
+            <div style="margin-top:8px">
+              <button class="btn" id="btnRollHP">Trefferpunkte würfeln</button>
+              <button class="btn" id="btnFixedHP">Fix + CON-Mod</button>
+            </div>
+            <div id="hpResult" class="muted" style="margin-top:6px"></div>
+          </div>
+          <div class="card">
+            <div id="newSpellsHeader" class="muted">Neue Zauber wählen</div>
+            <div id="newSpells" style="max-height:40vh; overflow:auto"></div>
+            <div class="muted" id="pickInfo" style="margin-top:6px"></div>
+          </div>
+        </div>
+        <div style="margin-top:10px; display:flex; justify-content:space-between">
+          <button class="btn" id="btnCancelLU">Abbrechen</button>
+          <button class="btn" id="btnApplyLU">Level-Up anwenden</button>
+        </div>`;
+      el("btnCancelLU").addEventListener("click", ()=> el("levelupModal").classList.remove("open"));
+      el("btnRollHP").addEventListener("click", ()=> rollHP(true));
+      el("btnFixedHP").addEventListener("click", ()=> rollHP(false));
+      el("btnApplyLU").addEventListener("click", applyLevelUp);
+    }
+    let luPicked=new Set(); let luHPResult=null;
+    function openLevelUp(){
+      luPicked=new Set(); luHPResult=null;
+      el("hpResult").textContent=""; el("curLevel").textContent=character.level; el("newLevel").textContent=character.level+1;
+      const cls=ALL_CLASSES.find(c=>c.id===character.classId);
+      const NEW_SPELLS={ wizard:2, bard:2, sorcerer:1, warlock:0, cleric:0, druid:0, paladin:1, ranger:1 };
+      const maxPick=NEW_SPELLS[cls.id]??0;
+      const nextLevel=character.level+1;
+      const maxSpellLevel=(getSlotsFor({...character, level:nextLevel}).length)||0;
+      const list=el("newSpells"); list.innerHTML="";
+      el("pickInfo").textContent=`Gewählt 0 von ${maxPick}`;
+      el("newSpellsHeader").textContent = maxPick ? `Neue Zauber wählen (max ${maxPick}, bis Stufe ${maxSpellLevel})` : "Diese Klasse lernt beim Level-Up keine neuen Zauber.";
+      if(maxPick>0){
+        const avail=allSpells.filter(s=>s.level>0 && s.level<=maxSpellLevel && s.classes.includes(character.classId) && !character.spellsKnown.includes(s.id))
+          .sort((a,b)=>(a.level-b.level)||a.name.localeCompare(b.name))
+          .slice(0,120);
+        avail.forEach(sp=>{
+          const row=document.createElement("label");
+          row.style.display="flex"; row.style.justifyContent="space-between"; row.style.alignItems="center"; row.style.borderTop="1px solid #ccc"; row.style.padding="4px 0";
+          row.innerHTML=`<div><b>${sp.name}</b><div class="muted" style="font-size:.85rem">Stufe ${sp.level} • ${sp.school||""}</div></div><input type="checkbox"/>`;
+          const cb=row.querySelector("input");
+          cb.addEventListener("change", ()=>{ if(cb.checked){ if(luPicked.size>=maxPick){ cb.checked=false; return; } luPicked.add(sp.id); } else luPicked.delete(sp.id); el("pickInfo").textContent=`Gewählt ${luPicked.size} von ${maxPick}`; });
+          list.appendChild(row);
+        });
+      }
+      el("levelupModal").classList.add("open");
+    }
+    function rollHP(random=true){
+      const cls=ALL_CLASSES.find(c=>c.id===character.classId); const die=cls?.hitDie||8;
+      const val=random ? d(die)+mod(character.abilities.CON) : Math.ceil(die/2)+1 + mod(character.abilities.CON);
+      const gain=Math.max(1,val); luHPResult={die,gain}; el("hpResult").textContent=`HP +${gain} (d${die}${random?" gewürfelt":" Durchschnitt"})`;
+    }
+    function applyLevelUp(){
+      character.level += 1;
+      if(luHPResult){ character.hpMax += luHPResult.gain; character.hp += luHPResult.gain; }
+      luPicked.forEach(id=>{ if(!character.spellsKnown.includes(id)) character.spellsKnown.push(id); });
+      el("levelupModal").classList.remove("open");
+      renderMeta(); renderSpellSlots(); updatePrepInfo(); renderKnownSpells(); saveAll();
+    }
+
+    // ===== Navigation =====
+    document.querySelectorAll('nav button').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+        document.getElementById(btn.dataset.page).classList.add('active');
+      });
+    });
+
+    // ===== Boot =====
+    loadAll(); applyTheme(); buildMainPage(); buildSpellsPage(); buildSettingsPage(); buildLevelUpModal();
+  </script>
+</body>
+</html>
