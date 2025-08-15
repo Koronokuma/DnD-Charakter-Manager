@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>D&D Charakter‑Manager</title>
+<style>
+:root{--accent:#9b1c1c;--border:#9b1c1c}
+*{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:2px solid var(--border)}
+h1{margin:0;color:var(--accent);font-size:20px}
+nav{display:flex;gap:8px}
+nav button{padding:6px 10px;border:1px solid var(--border);background:transparent;color:inherit;cursor:pointer;border-radius:8px}
+nav button.active{background:rgba(155,28,28,.15)}
+.page{display:none;padding:16px}.page.active{display:block}
+.row{display:flex;gap:12px;flex-wrap:wrap}.col{flex:1 1 300px}
+.card{border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px}
+.btn{padding:6px 10px;border:1px solid var(--border);background:transparent;color:inherit;cursor:pointer;border-radius:8px}
+.btn:disabled{opacity:.5;cursor:not-allowed}.muted{opacity:.8}
+.badge{display:inline-block;border:1px solid var(--border);border-radius:9999px;padding:2px 8px;font-size:.75rem;margin-left:6px}
+.cantrip{border-color:#107a2b;color:#107a2b}.bonus{border-color:#3b4fd1;color:#3b4fd1}
+input[type=number],input[type=text],select,textarea{background:transparent;color:inherit;border:1px solid var(--border);padding:6px 8px;border-radius:8px;width:100%}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.nowrap{white-space:nowrap}.spells-list{max-height:60vh;overflow:auto}
+
+body.dark{background:#0d0d0d;color:#fff} body.light{background:#f5f5f5;color:#111} body.parchment{background:#f4e2c2;color:#3b2f1e}
+body.light .card{background:#fff} body.parchment .card{background:rgba(255,255,255,.6)}
+
+.modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);padding:16px;z-index:10}
+.modal.open{display:flex}.modal .panel{background:#fff;color:#111;border-radius:12px;padding:16px;width:min(900px,96vw);max-height:90vh;overflow:auto}
+.progress{border:1px solid var(--border);height:10px;border-radius:9999px;overflow:hidden}.progress>div{height:100%;background:var(--accent);width:0%}
+.by-koro{position:fixed;right:10px;bottom:6px;font-size:.8rem;color:rgba(255,255,255,.6);pointer-events:none}
+body.light .by-koro{color:rgba(0,0,0,.5)} body.parchment .by-koro{color:#5a4a32;opacity:.7}
+</style>
+</head>
+<body class="dark">
+<header>
+  <div>
+    <h1>D&D Charakter‑Manager</h1>
+    <div class="muted" id="charMeta">Klasse: – • Stufe: 1</div>
+  </div>
+  <nav id="topNav">
+    <button data-page="main" class="active">Main</button>
+    <button data-page="spells">Spells</button>
+    <button data-page="features">Fähigkeiten</button>
+    <button data-page="settings">Settings</button>
+  </nav>
+</header>
+
+<!-- Seiten -->
+<div id="main" class="page active"></div>
+<div id="spells" class="page"></div>
+<div id="features" class="page"></div>
+<div id="settings" class="page"></div>
+
+<!-- Modals -->
+<div id="levelupModal" class="modal"><div class="panel" id="levelupPanel"></div></div>
+<div id="featureModal" class="modal"><div class="panel" id="featurePanel"></div></div>
+
+<div class="by-koro">by Koro</div>
+
+<script>
+/* =================== Daten & Utils =================== */
+const ABILITIES=["STR","DEX","CON","INT","WIS","CHA"];
+const SKILLS=[
+  {id:"acrobatics",ability:"DEX",nameEn:"Acrobatics",nameDe:"Akrobatik"},
+  {id:"animal_handling",ability:"WIS",nameEn:"Animal Handling",nameDe:"Tierkunde"},
+  {id:"arcana",ability:"INT",nameEn:"Arcana",nameDe:"Arkana"},
+  {id:"athletics",ability:"STR",nameEn:"Athletics",nameDe:"Athletik"},
+  {id:"deception",ability:"CHA",nameEn:"Deception",nameDe:"Täuschung"},
+  {id:"history",ability:"INT",nameEn:"History",nameDe:"Geschichte"},
+  {id:"insight",ability:"WIS",nameEn:"Insight",nameDe:"Motiv erkennen"},
+  {id:"intimidation",ability:"CHA",nameEn:"Intimidation",nameDe:"Einschüchtern"},
+  {id:"investigation",ability:"INT",nameEn:"Investigation",nameDe:"Nachforschung"},
+  {id:"medicine",ability:"WIS",nameEn:"Medicine",nameDe:"Heilkunde"},
+  {id:"nature",ability:"INT",nameEn:"Nature",nameDe:"Naturkunde"},
+  {id:"perception",ability:"WIS",nameEn:"Perception",nameDe:"Wahrnehmung"},
+  {id:"performance",ability:"CHA",nameEn:"Performance",nameDe:"Auftreten"},
+  {id:"persuasion",ability:"CHA",nameEn:"Persuasion",nameDe:"Überreden"},
+  {id:"religion",ability:"INT",nameEn:"Religion",nameDe:"Religion"},
+  {id:"sleight_of_hand",ability:"DEX",nameEn:"Sleight of Hand",nameDe:"Fingerfertigkeit"},
+  {id:"stealth",ability:"DEX",nameEn:"Stealth",nameDe:"Heimlichkeit"},
+  {id:"survival",ability:"WIS",nameEn:"Survival",nameDe:"Überleben"},
+];
+
+const ALL_CLASSES=[
+  {id:"barbarian",name:"Barbar",hitDie:12,primary:"STR",spellcasting:"none"},
+  {id:"bard",name:"Barde",hitDie:8,primary:"CHA",spellcasting:"full"},
+  {id:"cleric",name:"Kleriker",hitDie:8,primary:"WIS",spellcasting:"full"},
+  {id:"druid",name:"Druide",hitDie:8,primary:"WIS",spellcasting:"full"},
+  {id:"fighter",name:"Kämpfer",hitDie:10,primary:"STR",spellcasting:"third"},
+  {id:"monk",name:"Mönch",hitDie:8,primary:"DEX",spellcasting:"none"},
+  {id:"paladin",name:"Paladin",hitDie:10,primary:"CHA",spellcasting:"half"},
+  {id:"ranger",name:"Waldläufer",hitDie:10,primary:"WIS",spellcasting:"half"},
+  {id:"rogue",name:"Schurke",hitDie:8,primary:"DEX",spellcasting:"none"},
+  {id:"sorcerer",name:"Zauberer",hitDie:6,primary:"CHA",spellcasting:"full"},
+  {id:"warlock",name:"Hexenmeister",hitDie:8,primary:"CHA",spellcasting:"pact"},
+  {id:"wizard",name:"Magier",hitDie:6,primary:"INT",spellcasting:"full"},
+];
+
+const FULL_SLOTS={1:[2],2:[3],3:[4,2],4:[4,3],5:[4,3,2],6:[4,3,3],7:[4,3,3,1],8:[4,3,3,2],9:[4,3,3,3,1],10:[4,3,3,3,2],11:[4,3,3,3,2,1],12:[4,3,3,3,2,1],13:[4,3,3,3,2,1,1],14:[4,3,3,3,2,1,1],15:[4,3,3,3,2,1,1,1],16:[4,3,3,3,2,1,1,1],17:[4,3,3,3,2,1,1,1,1],18:[4,3,3,3,3,1,1,1,1],19:[4,3,3,3,3,2,1,1,1],20:[4,3,3,3,3,2,2,1,1]};
+const HALF_SLOTS={1:[],2:[2],3:[3],4:[3],5:[4,2],6:[4,2],7:[4,2],8:[4,2,2],9:[4,2,2],10:[4,2,2],11:[4,3,2],12:[4,3,2],13:[4,3,2,1],14:[4,3,2,1],15:[4,3,2,1],16:[4,3,3,1],17:[4,3,3,1],18:[4,3,3,2],19:[4,3,3,2],20:[4,3,3,2]};
+const THIRD_SLOTS={1:[],2:[],3:[2],4:[3],5:[3],6:[3],7:[4,2],8:[4,2],9:[4,2],10:[4,3],11:[4,3],12:[4,3],13:[4,3,2],14:[4,3,2],15:[4,3,2],16:[4,3,3],17:[4,3,3],18:[4,3,3],19:[4,3,3,1],20:[4,3,3,1]};
+const PACT_SLOTS={1:[1],2:[2],3:[2],4:[2],5:[2],6:[2],7:[2],8:[2],9:[2],10:[2],11:[3],12:[3],13:[3],14:[3],15:[3],16:[3],17:[4],18:[4],19:[4],20:[4]};
+
+const SUBCLASS_REGISTRY={
+  cleric:{type:"domain",chooseAtLevel:1,options:{
+    life:{key:"life",nameDe:"Lebensdomäne",nameEn:"Life Domain",featuresByLevel:{1:["domain_life_bonus_cantrip","domain_life_disciple_life"],2:["channel_divinity_preserve_life"],6:["blessed_healer"],8:["divine_strike"],17:["supreme_healing"]}}
+  }},
+  paladin:{type:"oath",chooseAtLevel:3,options:{
+    devotion:{key:"devotion",nameDe:"Schwur der Hingabe",nameEn:"Oath of Devotion",featuresByLevel:{3:["oath_devotion_channel_divinity"],7:["aura_of_devotion"],15:["purity_of_spirit"],20:["holy_nimbus"]}}
+  }},
+  warlock:{type:"patron",chooseAtLevel:1,options:{
+    fiend:{key:"fiend",nameDe:"Der Erzteufel",nameEn:"The Fiend",featuresByLevel:{1:["patron_fiend_expanded_spells","patron_fiend_dark_ones_blessing"],6:["dark_ones_own_luck"],10:["fiendish_resilience"],14:["hurl_through_hell"]}}
+  }},
+  wizard:{type:"tradition",chooseAtLevel:2,options:{
+    evocation:{key:"evocation",nameDe:"Schule der Hervorrufung",nameEn:"School of Evocation",featuresByLevel:{2:["evocation_savant","sculpt_spells"],6:["potent_cantrip"],10:["empowered_evocation"],14:["overchannel"]}}
+  }},
+  fighter:{type:"archetype",chooseAtLevel:3,options:{
+    champion:{key:"champion",nameDe:"Vorkämpfer",nameEn:"Champion",featuresByLevel:{3:["improved_critical"],7:["remarkable_athlete"],10:["additional_fighting_style"],15:["superior_critical"],18:["survivor"]}}
+  }},
+  monk:{type:"tradition",chooseAtLevel:3,options:{
+    open_hand:{key:"open_hand",nameDe:"Weg der offenen Hand",nameEn:"Way of the Open Hand",featuresByLevel:{3:["open_hand_technique"],6:["wholeness_of_body"],11:["tranquility"],17:["quivering_palm"]}}
+  }},
+  ranger:{type:"archetype",chooseAtLevel:3,options:{
+    hunter:{key:"hunter",nameDe:"Jäger",nameEn:"Hunter",featuresByLevel:{3:["hunter_prey"],7:["defensive_tactics"],11:["multiattack"],15:["superior_hunters_defense"]}}
+  }},
+  rogue:{type:"archetype",chooseAtLevel:3,options:{
+    thief:{key:"thief",nameDe:"Dieb",nameEn:"Thief",featuresByLevel:{3:["fast_hands","second_story_work"],9:["supreme_sneak"],13:["use_magic_device"],17:["thiefs_reflexes"]}}
+  }},
+  bard:{type:"college",chooseAtLevel:3,options:{
+    lore:{key:"lore",nameDe:"Kolleg der Gelehrsamkeit",nameEn:"College of Lore",featuresByLevel:{3:["bonus_proficiencies","cutting_words"],6:["additional_magical_secrets"],14:["peerless_skill"]}}
+  }},
+  druid:{type:"circle",chooseAtLevel:2,options:{
+    land:{key:"land",nameDe:"Zirkel der Lande",nameEn:"Circle of the Land",featuresByLevel:{2:["bonus_cantrip_druid","natural_recovery"],3:["circle_spells_land"],6:["land_strides"],10:["natures_ward"],14:["natures_sanctuary"]}}
+  }},
+  sorcerer:{type:"origin",chooseAtLevel:1,options:{
+    draconic:{key:"draconic",nameDe:"Drakonisches Erbe",nameEn:"Draconic Bloodline",featuresByLevel:{1:["dragon_ancestry","draconic_resilience"],6:["elemental_affinity"],14:["dragon_wings"],18:["draconic_presence"]}}
+  }},
+};
+
+const CLASS_FEATURES={
+  fighter:{5:["extra_attack"]},
+  barbarian:{5:["extra_attack"]},
+  paladin:{5:["extra_attack"]},
+  ranger:{5:["extra_attack"]},
+  rogue:{2:["cunning_action"]},
+  monk:{2:["ki"],5:["stunning_strike"]},
+};
+
+const FEATURES={
+  // (kompakte, aber genaue SRD‑Rulings)
+  domain_life_bonus_cantrip:{nameDe:"Bonus‑Zaubertrick (Leben)",nameEn:"Bonus Cantrip (Life)",textDe:"Lerne 1 zusätzlichen Kleriker‑Zaubertrick.",textEn:"Learn one additional cleric cantrip.",
+    longDe:`Du lernst einen zusätzlichen Kleriker‑Zaubertrick deiner Wahl.`,longEn:`You learn one additional cleric cantrip of your choice.`},
+  domain_life_disciple_life:{nameDe:"Jünger des Lebens",nameEn:"Disciple of Life",textDe:"+2 + Zaubergrad auf Heilung.",textEn:"+2 + spell level to healing.",
+    longDe:`Immer wenn du einen Heilzauber Grad 1+ wirkst, erhöht sich die Heilung um (2 + Zaubergrad).`,longEn:`Whenever you cast a healing spell of 1st level or higher, add 2 + the spell’s level to the healing.`},
+  channel_divinity_preserve_life:{nameDe:"Göttlicher Kanal: Leben bewahren",nameEn:"Channel Divinity: Preserve Life",textDe:"Heile 5×Level in 9 m, aber nicht über halbe Max‑TP.",textEn:"Restore 5×level HP within 30 ft; not above half max HP.",
+    longDe:`Als Aktion verteilst du insgesamt 5×Klerikerlevel TP auf Kreaturen in 9 m. Niemand wird über die Hälfte seiner Max‑TP geheilt.`,longEn:`As an action, distribute HP equal to 5×cleric level among creatures within 30 ft; none above half max HP.`},
+  blessed_healer:{nameDe:"Gesegneter Heiler",nameEn:"Blessed Healer",textDe:"Wenn du andere heilst, erhältst du 2 + Zaubergrad TP.",textEn:"When you heal others, you regain 2 + spell level HP.",
+    longDe:`Wenn du einen Heilzauber auf andere wirkst, heilst du selbst 2 + Zaubergrad.`,longEn:`When you cast a healing spell on others, you regain 2 + the spell’s level HP.`},
+  divine_strike:{nameDe:"Göttlicher Schlag",nameEn:"Divine Strike",textDe:"1×/Zug +1W8 (ab L14 +2W8) Strahlungsschaden.",textEn:"1/turn +1d8 (2d8 at 14th) radiant damage.",
+    longDe:`Einmal pro Zug fügst du bei einem Waffen‑Treffer +1W8 Strahlung zu (ab 14. Stufe +2W8).`,longEn:`Once per turn on a weapon hit, add +1d8 radiant damage (2d8 at 14th).`},
+  supreme_healing:{nameDe:"Überragende Heilung",nameEn:"Supreme Healing",textDe:"Heilwürfel zählen als Maximum.",textEn:"Healing dice are maximized.",
+    longDe:`Deine Heilzauber nutzen maximale Würfelergebnisse.`,longEn:`Your healing spells restore the maximum possible HP.`},
+
+  oath_devotion_channel_divinity:{nameDe:"Channel Divinity (Hingabe)",nameEn:"Channel Divinity (Devotion)",textDe:"Wähle Heilige Waffe oder Untreue bannen.",textEn:"Choose Sacred Weapon or Turn the Unholy.",
+    longDe:`(1) Heilige Waffe: Aktion, 1 Min.; addiere CHA zu Angriffswürfen mit der Waffe; sie leuchtet. (2) Untreue bannen: Aktion; Fiends/Untote in Reichweite WIS‑Save (SG 8+PB+CHA) oder „turned“.`,longEn:`(1) Sacred Weapon: action, 1 min; add CHA to attack rolls with the weapon; it sheds light. (2) Turn the Unholy: action; fiends/undead in range WIS save (DC 8+PB+CHA) or are turned.`},
+  aura_of_devotion:{nameDe:"Aura der Hingabe",nameEn:"Aura of Devotion",textDe:"Du & Verbündete in 3 m (ab 18: 9 m) sind immun gegen Bezauberung.",textEn:"You and allies within 10 ft (30 ft at 18th) can’t be charmed.",
+    longDe:`Solange in der Aura, Immunität gegen Bezauberung.`,longEn:`While in your aura, you and allies can’t be charmed.`},
+  purity_of_spirit:{nameDe:"Reinheit des Geistes",nameEn:"Purity of Spirit",textDe:"Permanenter Schutz vor Bösem & Gutem.",textEn:"Permanent Protection from Evil and Good.",
+    longDe:`Du stehst dauerhaft unter Protection from Evil and Good (Selbst).`,longEn:`You are permanently under Protection from Evil and Good.`},
+  holy_nimbus:{nameDe:"Heiliger Nimbus",nameEn:"Holy Nimbus",textDe:"Aktion: Aura 6 m, Strahlungsschaden an Feinden; Vorteil vs Zauber.",textEn:"Action: 30‑ft aura; radiant damage; advantage vs spells.",
+    longDe:`1 Min. Aura; Gegner erleiden Strahlungsschaden zu Beginn ihres Zuges; du hast Vorteil auf Rettungswürfe gegen Zauber.`,longEn:`1‑minute aura; foes take radiant damage at start of their turns; you have advantage on saves vs spells.`},
+
+  patron_fiend_expanded_spells:{nameDe:"Erweiterte Zauber (Erzteufel)",nameEn:"Expanded Spells (Fiend)",textDe:"Bonuszauber, immer verfügbar (SRD‑Liste).",textEn:"Expanded spell list, always available (SRD).",
+    longDe:`Du erhältst eine erweiterte Zauberliste (SRD), die stets verfügbar ist und als Warlock‑Zauber zählt.`,longEn:`You gain an expanded spell list (SRD) that’s always available and counts as warlock spells.`},
+  patron_fiend_dark_ones_blessing:{nameDe:"Segen des Dunklen",nameEn:"Dark One’s Blessing",textDe:"Wenn du Ziel auf 0 TP bringst: temp. TP = CHA + Warlock‑Level.",textEn:"Reduce a target to 0 HP: temp HP = CHA + warlock level.",
+    longDe:`Erhältst temporäre TP in Höhe von CHA‑Mod + Warlock‑Level.`,longEn:`Gain temp HP equal to CHA mod + warlock level.`},
+  dark_ones_own_luck:{nameDe:"Dunkles Glück",nameEn:"Dark One’s Own Luck",textDe:"1×/LR: +1W10 auf Check/Save (nach Wurf, vor Ergebnis).",textEn:"1/long rest: +1d10 to check/save (after roll, before outcome).",
+    longDe:`Du addierst 1W10, nachdem du den Wurf gesehen hast, vor Ergebnis.`,longEn:`Add 1d10 after seeing the roll, before the outcome.`},
+  fiendish_resilience:{nameDe:"Teuflische Widerstandskraft",nameEn:"Fiendish Resilience",textDe:"Nach kurzer Rast: wähle eine Schadensresistenz (mag. Waffen ausgenommen).",textEn:"After short rest: choose a damage resistance (magic weapons excluded).",
+    longDe:`Gilt bis du nach einer kurzen Rast neu wählst.`,longEn:`Lasts until you choose again after a short rest.`},
+  hurl_through_hell:{nameDe:"Höllenritt",nameEn:"Hurl Through Hell",textDe:"Bei Treffer: kurz verbannt; bei Rückkehr 10W10 psychischer Schaden.",textEn:"On hit: banish briefly; on return 10d10 psychic.",
+    longDe:`Kein Rettungswurf beim Verbannen; Schaden bei Rückkehr am Ende deines nächsten Zuges.`,longEn:`No save on banish; damage applied when it returns at end of your next turn.`},
+
+  evocation_savant:{nameDe:"Hervorrufungsgelehrter",nameEn:"Evocation Savant",textDe:"Halbiere Zeit & GP fürs Abschreiben von Evocations.",textEn:"Half time & gp to copy evocations.",
+    longDe:`Kopieren von Zaubern der Schule Hervorrufung kostet die Hälfte.`,longEn:`Copying evocation spells costs half.`},
+  sculpt_spells:{nameDe:"Zauber formen",nameEn:"Sculpt Spells",textDe:"Wähle 1 + Zaubergrad Kreaturen → Auto‑Save & 0 Schaden (falls der Zauber halbiert).",textEn:"Choose 1 + spell level creatures → auto save & 0 dmg (if halves).",
+    longDe:`Bei deinen Evocation‑Flächenzaubern sind gewählte Kreaturen automatisch erfolgreich und erleiden keinen Schaden, wenn der Zauber bei Erfolg normalerweise halbiert.`,longEn:`For your evocation area spells, chosen creatures auto succeed and take no damage if the spell halves on success.`},
+  potent_cantrip:{nameDe:"Mächtiger Zaubertrick",nameEn:"Potent Cantrip",textDe:"Bei erfolgreichem Save gegen deinen Cantrip: trotzdem halber Schaden (wenn halbiert).",textEn:"On cantrip save success: still half damage (if halves).",
+    longDe:`Gilt nur für Cantrips, die bei Erfolg halbieren.`,longEn:`Only for cantrips that deal half on success.`},
+  empowered_evocation:{nameDe:"Gestärkte Hervorrufung",nameEn:"Empowered Evocation",textDe:"Addiere INT zu einem Schadenswurf deiner Evocation‑Zauber.",textEn:"Add INT to one damage roll of your evocation spells.",
+    longDe:`Einmal pro Zauber.`,longEn:`Once per spell.`},
+  overchannel:{nameDe:"Überkanalisierung",nameEn:"Overchannel",textDe:"Maximiere Schaden (Grad ≤5); weitere Nutzungen vor LR verursachen steigenden Nekroseschaden (Resistenzen ignoriert).",textEn:"Maximize dmg (≤5th); further uses before LR deal increasing necrotic (ignores resistances).",
+    longDe:`Erste Nutzung gratis; weitere vor langer Rast fügen dir 2W12 Nekrose pro zusätzlicher Nutzung zu (steigend).`,longEn:`First use free; additional uses before long rest deal 2d12 necrotic per use (increasing).`},
+
+  improved_critical:{nameDe:"Verbesserter Krit",nameEn:"Improved Critical",textDe:"Krit auf 19–20.",textEn:"Crit on 19–20.",longDe:`Waffenangriffe kriten auf 19–20.`,longEn:`Weapon attacks crit on 19–20.`},
+  remarkable_athlete:{nameDe:"Außergewöhnlicher Athlet",nameEn:"Remarkable Athlete",textDe:"+½ PB (aufgerundet) auf STR/DEX/CON‑Checks ohne Proficiency; +3 m Sprung (mit Anlauf).",textEn:"+½ PB to STR/DEX/CON checks w/o proficiency; +10 ft running jump.",
+    longDe:`Gilt nur für Checks ohne bereits eingerechneten PB.`,longEn:`Applies only to checks that don’t already include PB.`},
+  additional_fighting_style:{nameDe:"Zusätzlicher Kampfstil",nameEn:"Additional Fighting Style",textDe:"Wähle einen weiteren SRD‑Kampfstil.",textEn:"Choose another SRD fighting style.",
+    longDe:`Zweite Stil‑Wahl aus der SRD‑Liste.`,longEn:`Choose an additional style from SRD list.`},
+  superior_critical:{nameDe:"Hervorragender Krit",nameEn:"Superior Critical",textDe:"Krit auf 18–20.",textEn:"Crit on 18–20.",longDe:`Waffenangriffe kriten auf 18–20.`,longEn:`Weapon attacks crit on 18–20.`},
+  survivor:{nameDe:"Überlebenskünstler",nameEn:"Survivor",textDe:"Zugbeginn: +5+CON HP, wenn ≤ halbe HP und nicht 0.",textEn:"Start of turn: +5+CON HP if ≤ half HP and not 0.",
+    longDe:`Passiv, kein Limit.`,longEn:`Passive; no limit.`},
+
+  open_hand_technique:{nameDe:"Technik der offenen Hand",nameEn:"Open Hand Technique",textDe:"Flurry‑Treffer: Push 4,5 m (STR‑Save) / Prone (STR‑Save) / keine Reaktionen.",textEn:"Flurry hit: push 15 ft (STR save) / prone (STR save) / no reactions.",
+    longDe:`Wähle eine der drei Optionen, wenn ein Flurry‑Treffer landet.`,longEn:`Choose one of three options when a Flurry hit lands.`},
+  wholeness_of_body:{nameDe:"Ganzheit des Körpers",nameEn:"Wholeness of Body",textDe:"1×/LR Aktion: Heile 3×Monkslevel.",textEn:"1/long rest action: heal 3×monk level.",
+    longDe:`Selbstheilung als Aktion.`,longEn:`Self‑heal as an action.`},
+  tranquility:{nameDe:"Gelassenheit",nameEn:"Tranquility",textDe:"Nach LR: Sanctuary auf dir bis du angreifst/zauberst.",textEn:"After LR: sanctuary on you until you attack/cast.",
+    longDe:`Endet bei offensiver Handlung.`,longEn:`Ends upon offensive action.`},
+  quivering_palm:{nameDe:"Zitternde Hand",nameEn:"Quivering Palm",textDe:"3 Ki: markiere Ziel; später Aktion: CON‑Save → 0 TP / 10 TP.",textEn:"3 Ki: mark target; later action: CON save → 0 HP / 10 HP.",
+    longDe:`Klassisches Mönchs‑Finisher‑Feature.`,longEn:`Classic monk finisher.`},
+
+  hunter_prey:{nameDe:"Jägerbeute",nameEn:"Hunter’s Prey",textDe:"Wähle Colossus/Giant/Horde‑Option.",textEn:"Choose Colossus/Giant/Horde option.",
+    longDe:`Colossus: 1×/Zug +1W8 vs verwundet. Giant: Reaktion‑Gegenangriff gegen Groß+. Horde: 1×/Zug zusätzlicher Angriff auf anderes Ziel in 1,5 m.`,longEn:`Colossus: 1/turn +1d8 vs wounded. Giant: reaction attack vs Large+. Horde: 1/turn extra attack vs second target within 5 ft.`},
+  defensive_tactics:{nameDe:"Defensivtaktiken",nameEn:"Defensive Tactics",textDe:"Wähle Escape/Multiattack/Steel Will.",textEn:"Choose Escape/Multiattack/Steel Will.",
+    longDe:`Escape: OA gegen dich mit Nachteil. Multiattack: +4 AC gegen weitere Angriffe derselben Kreatur. Steel Will: Vorteil vs Furcht.`,longEn:`Escape: OAs vs you have disadvantage. Multiattack: +4 AC vs subsequent attacks from same creature. Steel Will: Advantage vs frightened.`},
+  multiattack:{nameDe:"Mehrfachangriff",nameEn:"Multiattack",textDe:"Wähle Volley/Whirlwind (Aktion).",textEn:"Choose Volley/Whirlwind (action).",
+    longDe:`Volley: Fernkampfangriff gegen jede Kreatur in 3 m Radius. Whirlwind: Nahkampfangriff gegen jede Kreatur in 1,5 m.`,longEn:`Volley: ranged attack against each creature in a 10‑ft radius. Whirlwind: melee attack against each creature within 5 ft.`},
+  superior_hunters_defense:{nameDe:"Überlegene Jägerabwehr",nameEn:"Superior Hunter’s Defense",textDe:"Wähle Evasion/Stand‑Against/Uncanny.",textEn:"Choose Evasion/Stand‑Against/Uncanny.",
+    longDe:`Evasion: DEX‑Saves AoE: 0/Halb. Stand Against: Reaktion – verfehlten Angriff umlenken. Uncanny: Reaktion – Schaden halbieren.`,longEn:`Evasion: DEX saves AoE: 0/Half. Stand Against: reaction redirect. Uncanny: reaction halve damage.`},
+
+  fast_hands:{nameDe:"Flinke Hände",nameEn:"Fast Hands",textDe:"Bonusaktion: Objekt/Diebeswerkzeug/Heilerkit (im Rahmen Cunning Action).",textEn:"Bonus action: Use Object/thieves’ tools/healer’s kit (with Cunning Action).",
+    longDe:`Zusätzliche Optionen in deiner Gewandten Aktion.`,longEn:`Additional options in Cunning Action.`},
+  second_story_work:{nameDe:"Arbeit im zweiten Stock",nameEn:"Second‑Story Work",textDe:"Klettern normal; +3 m Sprung (mit Anlauf).",textEn:"Climb at normal; +10 ft running jump.",
+    longDe:`Verbesserte Mobilität.`,longEn:`Improved mobility.`},
+  supreme_sneak:{nameDe:"Überragende Heimlichkeit",nameEn:"Supreme Sneak",textDe:"Vorteil auf Stealth bei ≤ halber Bewegung.",textEn:"Advantage on Stealth at ≤ half speed.",
+    longDe:`Langsames Bewegen = leiser.`,longEn:`Move slowly to be stealthier.`},
+  use_magic_device:{nameDe:"Magische Geräte nutzen",nameEn:"Use Magic Device",textDe:"Ignoriere Voraussetzungen (SRD).",textEn:"Ignore requirements (SRD).",
+    longDe:`Du kannst Gegenstände verwenden, die sonst Beschränkungen haben.`,longEn:`Use items that normally have restrictions.`},
+  thiefs_reflexes:{nameDe:"Reflexe des Diebes",nameEn:"Thief’s Reflexes",textDe:"Erste Runde: zwei Züge (zweiter bei Ini−10).",textEn:"First round: two turns (second at init−10).",
+    longDe:`Sehr starker Opener.`,longEn:`Powerful opener.`},
+
+  dragon_ancestry:{nameDe:"Drachenabstammung",nameEn:"Dragon Ancestry",textDe:"Lege deine Element‑Art fest.",textEn:"Set your elemental type.",
+    longDe:`Bestimmt die Schadensart weiterer Features.`,longEn:`Determines damage type for later features.`},
+  draconic_resilience:{nameDe:"Drakonische Widerstandskraft",nameEn:"Draconic Resilience",textDe:"+1 HP/Level; ungerüstet AC=13+DEX.",textEn:"+1 HP/level; unarmored AC=13+DEX.",
+    longDe:`Defensiv‑Boost.`,longEn:`Defensive boost.`},
+  elemental_affinity:{nameDe:"Elementare Affinität",nameEn:"Elemental Affinity",textDe:"+CHA auf Schaden deiner Element‑Art (1×/Zauber); 1×/LR Resistenz (CHA Runden).",textEn:"+CHA to damage (1/spell); 1/LR resistance (CHA rounds).",
+    longDe:`Sowohl Offensiv‑ als auch Defensivbonus.`,longEn:`Offensive and defensive benefits.`},
+  dragon_wings:{nameDe:"Drachenflügel",nameEn:"Dragon Wings",textDe:"Bonusaktion: fliegen = Laufbewegung.",textEn:"Bonus action: fly = speed.",
+    longDe:`Beende nicht in der Luft.`,longEn:`Don’t end mid‑air.`},
+  draconic_presence:{nameDe:"Drakonische Präsenz",nameEn:"Draconic Presence",textDe:"Aktion+1 SP: WIS‑Save → Furcht/Ehrfurcht (Konz., 1 Min).",textEn:"Action+1 SP: WIS save → frightened/awe (conc., 1 min).",
+    longDe:`Große Kontroll‑Aura.`,longEn:`Large control aura.`},
+
+  extra_attack:{nameDe:"Zusätzlicher Angriff",nameEn:"Extra Attack",textDe:"Bei Aktion Angriff: 2 Angriffe.",textEn:"Attack action: 2 attacks.",
+    longDe:`Standard‑Martial‑Power‑Spike.`,longEn:`Martial power spike.`},
+  cunning_action:{nameDe:"Gewandte Aktion",nameEn:"Cunning Action",textDe:"Bonusaktion: Dash, Disengage, Hide.",textEn:"Bonus action: Dash, Disengage, Hide.",
+    longDe:`Hohe Mobilität/Utility.`,longEn:`Mobility/utility.`},
+  ki:{nameDe:"Ki",nameEn:"Ki",textDe:"Ressource für Flurry/Patient/Step (SRD).",textEn:"Resource for Flurry/Patient/Step (SRD).",
+    longDe:`Siehe SRD‑Details.`,longEn:`See SRD.`},
+  stunning_strike:{nameDe:"Betäubender Schlag",nameEn:"Stunning Strike",textDe:"Bei Treffer: 1 Ki → CON‑Save, Fail=betäubt.",textEn:"On hit: 1 Ki → CON save, fail=stunned.",
+    longDe:`SG=8+PB+WIS.`,longEn:`DC=8+PB+WIS.`},
+};
+
+/* =================== State & Helpers =================== */
+const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
+const mod=(score)=>Math.floor((score-10)/2);
+const d=(sides)=>Math.floor(Math.random()*sides)+1;
+const profBonus=(lvl)=>Math.ceil(lvl/4)+1;
+const skillLabel=(sk)=>settings.lang==="de"?(sk.nameDe||sk.nameEn||sk.id):(sk.nameEn||sk.nameDe||sk.id);
+
+function getSlotsFor(ch){
+  const cls=ALL_CLASSES.find(c=>c.id===ch.classId);
+  const lvl=Math.max(1,Math.min(20,parseInt(ch.level||1)));
+  if(!cls) return [];
+  switch(cls.spellcasting){
+    case "full": return FULL_SLOTS[lvl]||[];
+    case "half": return HALF_SLOTS[lvl]||[];
+    case "third": return THIRD_SLOTS[lvl]||[];
+    case "pact": return PACT_SLOTS[lvl]||[];
+    default: return [];
+  }
+}
+function subclassDefinitionFor(char){
+  const reg=SUBCLASS_REGISTRY[char.classId]; if(!reg) return null;
+  return (!char.subclass) ? reg : {...reg,chosen:reg.options[char.subclass.key]||null};
+}
+function newFeaturesForLevel(char,nextLevel){
+  const out=[]; const reg=subclassDefinitionFor(char);
+  if(reg && reg.chosen && reg.chosen.featuresByLevel[nextLevel]) out.push(...reg.chosen.featuresByLevel[nextLevel]);
+  if(CLASS_FEATURES[char.classId]?.[nextLevel]) out.push(...CLASS_FEATURES[char.classId][nextLevel]);
+  return out.filter(fid=>!char.featuresKnown.includes(fid));
+}
+function featureLabel(fid){const f=FEATURES[fid]; return f ? (settings.lang==="de"?(f.nameDe||f.nameEn):(f.nameEn||f.nameDe)) : fid;}
+function featureText(fid){const f=FEATURES[fid]; return f ? (settings.lang==="de"?(f.textDe||f.textEn):(f.textEn||f.textDe)) : "";}
+
+/* =================== Persistenz =================== */
+let settings={lang:"de",theme:"dark"};
+let character={
+  name:"Ari Sturmwind",classId:"wizard",level:1,ac:12,hpMax:8,hp:8,
+  abilities:{STR:8,DEX:14,CON:14,INT:16,WIS:12,CHA:10},
+  usedSlots:{}, spellsKnown:[], spellsPrepared:[], bonusSpells:[],
+  proficiencySkills:[], proficiencySaves:[],
+  subclass:null, featuresKnown:[],
+  background:{appearance:"",ideals:"",bonds:"",flaws:""}
+};
+let allSpells=[];
+
+function saveAll(){localStorage.setItem("dnd_settings_v1",JSON.stringify(settings));localStorage.setItem("dnd_character_v1",JSON.stringify(character));}
+function loadAll(){try{const s=JSON.parse(localStorage.getItem("dnd_settings_v1")||"{}");const c=JSON.parse(localStorage.getItem("dnd_character_v1")||"{}");settings={...settings,...s};character={...character,...c};}catch{}}
+function applyTheme(){document.body.className=settings.theme||"dark";}
+
+/* =================== UI: Navigation =================== */
+function setupTabs(){
+  const nav=document.getElementById("topNav");
+  if(!nav) return;
+  nav.querySelectorAll("button").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      nav.querySelectorAll("button").forEach(b=>b.classList.remove("active"));
+      btn.classList.add("active");
+      document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+      document.getElementById(btn.dataset.page).classList.add("active");
+    });
+  });
+}
+
+/* =================== Main Page =================== */
+function renderMeta(){
+  const cls=ALL_CLASSES.find(c=>c.id===character.classId);
+  const meta=document.getElementById("charMeta");
+  if(meta) meta.textContent=`Klasse: ${cls?cls.name:"–"} • Stufe: ${character.level}`;
+  const pbEl=document.getElementById("profBonus"); if(pbEl) pbEl.textContent=(profBonus(character.level)>=0?"+":"")+profBonus(character.level);
+  const lvlEl=document.getElementById("charLevel"); if(lvlEl) lvlEl.textContent=character.level;
+}
+function rollCheck(label,bonus){
+  const r=d(20),total=r+bonus,n20=r===20?" 🎉 NAT 20!":"",n1=r===1?" 💀 NAT 1!":"";
+  const log=document.getElementById("diceLog"); if(log) log.innerHTML=`<div>${label}: ${r} ${bonus>=0?"+":""}${bonus} = <b>${total}</b>${n20}${n1}</div>`+log.innerHTML;
+}
+function renderAbilities(){
+  const cont=document.getElementById("abilities"); if(!cont) return; cont.innerHTML="";
+  ABILITIES.forEach(ab=>{
+    const score=character.abilities[ab], m=mod(score);
+    const row=document.createElement("div");
+    row.innerHTML=`${ab}: <input type="number" value="${score}" style="width:64px"
+      oninput="character.abilities['${ab}']=parseInt(this.value||'10'); saveAll(); renderAbilities(); renderSaves(); renderSkills(); updatePrepInfo(); buildFeaturesPage();" />
+      (Mod: ${m>=0?"+":""}${m}) <button class="btn" onclick="rollCheck('${ab}', ${m})">Würfeln</button>`;
+    cont.appendChild(row);
+  });
+}
+function renderSaves(){
+  const cont=document.getElementById("saves"); if(!cont) return; cont.innerHTML="";
+  ABILITIES.forEach(ab=>{
+    const base=mod(character.abilities[ab]), prof=character.proficiencySaves.includes(ab)?profBonus(character.level):0, total=base+prof;
+    const row=document.createElement("div");
+    row.innerHTML=`${ab}: ${total>=0?"+":""}${total} <span class="muted" style="font-size:.85rem">(Mod ${base>=0?"+":""}${base}${prof?` + PB ${prof}`:""})</span>
+      <button class="btn" onclick="rollCheck('${ab} Save', ${total})">Würfeln</button>`;
+    cont.appendChild(row);
+  });
+}
+function renderSkills(){
+  const cont=document.getElementById("skills"); if(!cont) return; cont.innerHTML="";
+  SKILLS.forEach(sk=>{
+    const base=mod(character.abilities[sk.ability]), prof=character.proficiencySkills.includes(sk.id)?profBonus(character.level):0, total=base+prof;
+    const row=document.createElement("div");
+    row.innerHTML=`${skillLabel(sk)} (${sk.ability}): ${total>=0?"+":""}${total}
+      <span class="muted" style="font-size:.85rem">(Mod ${base>=0?"+":""}${base}${prof?` + PB ${prof}`:""})</span>
+      <button class="btn" onclick="rollCheck('${skillLabel(sk)}', ${total})">Würfeln</button>`;
+    cont.appendChild(row);
+  });
+}
+function buildMainPage(){
+  const root=document.getElementById("main"); if(!root) return;
+  root.innerHTML=`
+    <div class="row">
+      <div class="col">
+        <div class="card">
+          <h2 style="margin-top:0">Charakter</h2>
+          <div class="grid2">
+            <label>Name<br/><input id="charName"/></label>
+            <label>Klasse<br/><select id="charClass"></select></label>
+            <label>Level<br/><span id="charLevel">1</span> <button class="btn" id="btnOpenLevelUp">Level Up</button></label>
+            <label>AC<br/><input id="charAC" type="number"/></label>
+            <label>HP (max)<br/><input id="charHPMax" type="number"/></label>
+            <label>HP (aktuell)<br/><input id="charHP" type="number"/></label>
+            <div>Proficiency Bonus<br/><span id="profBonus">+2</span></div>
+          </div>
+        </div>
+        <div class="card"><h3>Würfel‑Log</h3><div id="diceLog" style="max-height:180px;overflow:auto;font-size:.92rem"></div></div>
+      </div>
+      <div class="col">
+        <div class="card"><h3>Ability Scores</h3><div id="abilities"></div></div>
+        <div class="card"><h3>Saving Throws</h3><div id="saves"></div></div>
+      </div>
+      <div class="col">
+        <div class="card"><h3>Skills</h3><div id="skills"></div></div>
+      </div>
+    </div>`;
+  const sel=document.getElementById("charClass");
+  sel.innerHTML=ALL_CLASSES.map(c=>`<option value="${c.id}">${c.name}</option>`).join("");
+  sel.value=character.classId;
+
+  document.getElementById("charName").value=character.name;
+  document.getElementById("charAC").value=character.ac;
+  document.getElementById("charHPMax").value=character.hpMax;
+  document.getElementById("charHP").value=character.hp;
+
+  document.getElementById("charName").addEventListener("input",e=>{character.name=e.target.value;saveAll();renderMeta()});
+  document.getElementById("charAC").addEventListener("input",e=>{character.ac=parseInt(e.target.value||"10");saveAll()});
+  document.getElementById("charHPMax").addEventListener("input",e=>{character.hpMax=parseInt(e.target.value||"1");saveAll()});
+  document.getElementById("charHP").addEventListener("input",e=>{character.hp=parseInt(e.target.value||"1");saveAll()});
+  sel.addEventListener("change",e=>{character.classId=e.target.value;saveAll();renderMeta();renderSpellSlots();filterAndRenderAvailable();updatePrepInfo();buildFeaturesPage();});
+
+  const btn=document.getElementById("btnOpenLevelUp");
+  btn.addEventListener("click",openLevelUp);
+
+  renderMeta(); renderAbilities(); renderSaves(); renderSkills();
+}
+
+/* =================== Spells Page =================== */
+function buildSpellsPage(){
+  const root=document.getElementById("spells"); if(!root) return;
+  root.innerHTML=`
+    <div class="card">
+      <h2 style="margin-top:0">Spell Slots</h2>
+      <div id="spellSlotsContainer"></div>
+      <button class="btn" id="btnLongRest">Lange Rast</button>
+      <div style="margin-top:6px">Vorbereitete Zauber (ohne Cantrips/Bonus): <b id="prepCount">0</b>/<b id="prepLimit">0</b></div>
+    </div>
+    <div class="row">
+      <div class="col">
+        <div class="card">
+          <h3>Verfügbare Zauber</h3>
+          <div class="row" style="align-items:center;margin-bottom:8px">
+            <input id="spellQuery" placeholder="Filter"/>
+            <label class="nowrap">Level
+              <select id="spellLevelFilter">
+                <option value="all">All</option><option value="0">0</option><option value="1">1</option><option value="2">2</option>
+                <option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+              </select>
+            </label>
+          </div>
+          <div class="progress" id="spellProgress" style="display:none"><div></div></div>
+          <div id="availableSpells" class="spells-list"></div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <h3>Bekannte & vorbereitete Zauber</h3>
+          <div id="knownSpells" class="spells-list"></div>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById("spellQuery").addEventListener("input",filterAndRenderAvailable);
+  document.getElementById("spellLevelFilter").addEventListener("change",filterAndRenderAvailable);
+  document.getElementById("btnLongRest").addEventListener("click",longRestResetSlots);
+  renderSpellSlots(); updatePrepInfo(); fetchAllSpells();
+}
+function longRestResetSlots(){
+  const cls=ALL_CLASSES.find(c=>c.id===character.classId);
+  const slots=getSlotsFor(character);
+  const next={};
+  if(cls?.spellcasting==="pact"){ next.pact=0; }
+  else for(let i=0;i<slots.length;i++) next[i+1]=0;
+  character.usedSlots=next; renderSpellSlots(); saveAll();
+}
+function renderSpellSlots(){
+  const container=document.getElementById("spellSlotsContainer"); if(!container) return; container.innerHTML="";
+  const cls=ALL_CLASSES.find(c=>c.id===character.classId); const slots=getSlotsFor(character);
+  if(cls?.spellcasting==="pact"){
+    const pactMax=(slots[0]||0), used=character.usedSlots.pact||0;
+    container.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center">
+      <div><b>Pakt‑Slots</b>: ${used}/${pactMax}</div>
+      <div><button class="btn" ${used<=0?"disabled":""} onclick="changePactUsed(-1)">–</button>
+           <button class="btn" ${used>=pactMax?"disabled":""} onclick="changePactUsed(1)">+</button></div></div>`; return;
+  }
+  if(!slots.length){container.innerHTML=`<div class="muted">Keine Spell Slots für diese Klasse/Stufe.</div>`;return;}
+  slots.forEach((max,i)=>{
+    const lvl=i+1, used=character.usedSlots[lvl]||0;
+    const row=document.createElement("div"); row.style.display="flex"; row.style.justifyContent="space-between"; row.style.marginBottom="6px";
+    row.innerHTML=`<div><b>Stufe ${lvl}</b>: ${used}/${max}</div>
+      <div><button class="btn" ${used<=0?"disabled":""} onclick="changeUsedSlot(${lvl},-1)">–</button>
+      <button class="btn" ${used>=max?"disabled":""} onclick="changeUsedSlot(${lvl},1)">+</button></div>`;
+    container.appendChild(row);
+  });
+}
+function changeUsedSlot(lvl,delta){const slots=getSlotsFor(character), max=slots[lvl-1]||0, cur=character.usedSlots[lvl]||0; character.usedSlots[lvl]=clamp(cur+delta,0,max); renderSpellSlots(); saveAll();}
+function changePactUsed(delta){const pactMax=(getSlotsFor(character)[0])||0, cur=character.usedSlots.pact||0; character.usedSlots.pact=clamp(cur+delta,0,pactMax); renderSpellSlots(); saveAll();}
+
+function updatePrepInfo(){
+  const cls=ALL_CLASSES.find(c=>c.id===character.classId), primary=cls?.primary||"INT";
+  const limit=Math.max(1,mod(character.abilities[primary])+character.level);
+  const count=character.spellsPrepared.filter(id=>{const sp=allSpells.find(s=>s.id===id);return sp&&sp.level>0&&!character.bonusSpells.includes(id)}).length;
+  const cap=document.getElementById("prepLimit"), cnt=document.getElementById("prepCount");
+  if(cap) cap.textContent=limit; if(cnt) cnt.textContent=count;
+}
+
+async function fetchAllSpells(){
+  const progress=document.getElementById("spellProgress"), bar=progress?progress.firstElementChild:null, outEl=document.getElementById("availableSpells");
+  try{
+    if(outEl) outEl.textContent="Lade Zauber…"; if(progress) progress.style.display="block"; if(bar) bar.style.width="0%";
+    const res=await fetch("https://www.dnd5eapi.co/api/spells");
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const list=await res.json(); if(!list||!Array.isArray(list.results)) throw new Error("Ungültige API‑Antwort");
+    const urls=list.results.map(s=>"https://www.dnd5eapi.co"+s.url);
+    let done=0; const out=[]; const workers=8;
+    async function worker(q){while(q.length){const u=q.shift();try{const r=await fetch(u);if(!r.ok){}const d=await r.json();out.push({id:d.index,name:d.name,level:d.level,school:d.school?.name||"",classes:(d.classes||[]).map(c=>c.index),desc:Array.isArray(d.desc)?d.desc.join(" "):String(d.desc||"")});}catch{}finally{done++;if(bar)bar.style.width=((done/urls.length)*100).toFixed(1)+"%";}}}
+    const q=urls.slice(); await Promise.all(Array.from({length:workers},()=>worker(q)));
+    allSpells=out.sort((a,b)=>(a.level-b.level)||a.name.localeCompare(b.name));
+    if(progress) progress.style.display="none";
+    filterAndRenderAvailable(); renderKnownSpells(); renderSpellSlots(); updatePrepInfo();
+  }catch(e){
+    if(progress) progress.style.display="none"; if(outEl) outEl.textContent="Fehler beim Laden der Zauber: "+(e?.message||e);
+  }
+}
+function filterAndRenderAvailable(){
+  const cont=document.getElementById("availableSpells"); if(!cont) return; cont.innerHTML="";
+  const clsId=character.classId, q=(document.getElementById("spellQuery")?.value||"").toLowerCase(), lvf=document.getElementById("spellLevelFilter")?.value||"all";
+  const list=allSpells.filter(s=>s.classes.includes(clsId));
+  if(!list.length){cont.innerHTML=`<div class="muted">Keine Zauber für diese Klasse gefunden.</div>`;return;}
+  let filtered=list; if(q) filtered=filtered.filter(s=>s.name.toLowerCase().includes(q)||(s.desc||"").toLowerCase().includes(q));
+  if(lvf!=="all"){const n=parseInt(lvf); filtered=filtered.filter(s=>s.level===n);}
+  const map=new Map(); for(const sp of filtered){if(!map.has(sp.level)) map.set(sp.level,[]); map.get(sp.level).push(sp);}
+  const levels=[...map.keys()].sort((a,b)=>a-b); if(!levels.length){cont.innerHTML=`<div class="muted">Keine Treffer.</div>`;return;}
+  for(const lvl of levels){
+    const head=document.createElement("div"); head.className="muted"; head.style.margin="6px 0 4px"; head.textContent=lvl===0?"Zaubertricks (Cantrips)":`Stufe ${lvl}`; cont.appendChild(head);
+    map.get(lvl).sort((a,b)=>a.name.localeCompare(b.name)).forEach(sp=>{
+      const row=document.createElement("div"); row.style.display="flex"; row.style.justifyContent="space-between"; row.style.alignItems="center"; row.style.borderTop="1px solid var(--border)"; row.style.padding="6px 0";
+      row.innerHTML=`<div><div><b>${sp.name}</b>${sp.level===0?'<span class="badge cantrip">Cantrip</span>':''}</div><div class="muted" style="font-size:.85rem">${sp.school||""}</div></div>
+                     <button class="btn">Hinzufügen</button>`;
+      row.querySelector("button").addEventListener("click",()=>addKnown(sp.id));
+      cont.appendChild(row);
+    });
+  }
+}
+function addKnown(id){if(!character.spellsKnown.includes(id)) character.spellsKnown.push(id); renderKnownSpells(); saveAll();}
+function togglePrepared(id){
+  const sp=allSpells.find(s=>s.id===id); if(!sp) return; if(sp.level===0) return; if(character.bonusSpells.includes(id)) return;
+  const isPrep=character.spellsPrepared.includes(id);
+  if(isPrep){character.spellsPrepared=character.spellsPrepared.filter(x=>x!==id);}
+  else{
+    const cls=ALL_CLASSES.find(c=>c.id===character.classId), primary=cls?.primary||"INT";
+    const limit=Math.max(1,mod(character.abilities[primary])+character.level);
+    const preparedBase=character.spellsPrepared.filter(pid=>{const s2=allSpells.find(s=>s.id===pid);return s2&&s2.level>0&&!character.bonusSpells.includes(pid)}).length;
+    if(preparedBase>=limit){alert("Vorbereitungs‑Limit erreicht."); return;}
+    character.spellsPrepared.push(id);
+  }
+  renderKnownSpells(); updatePrepInfo(); saveAll();
+}
+function toggleBonus(id){
+  const set=new Set(character.bonusSpells); set.has(id)?set.delete(id):set.add(id);
+  character.bonusSpells=[...set];
+  character.spellsPrepared=character.spellsPrepared.filter(x=>!set.has(x)); // Bonus wird nicht vorbereitet
+  renderKnownSpells(); updatePrepInfo(); saveAll();
+}
+function removeKnown(id){
+  character.spellsKnown=character.spellsKnown.filter(x=>x!==id);
+  character.spellsPrepared=character.spellsPrepared.filter(x=>x!==id);
+  character.bonusSpells=character.bonusSpells.filter(x=>x!==id);
+  renderKnownSpells(); updatePrepInfo(); saveAll();
+}
+function renderKnownSpells(){
+  const cont=document.getElementById("knownSpells"); if(!cont) return; cont.innerHTML="";
+  const known=character.spellsKnown.map(id=>allSpells.find(s=>s.id===id)).filter(Boolean).sort((a,b)=>(a.level-b.level)||a.name.localeCompare(b.name));
+  if(!known.length){cont.innerHTML=`<div class="muted">Noch keine Zauber bekannt.</div>`;return;}
+  known.forEach(sp=>{
+    const isPrep=character.spellsPrepared.includes(sp.id), isBonus=character.bonusSpells.includes(sp.id);
+    const row=document.createElement("div"); row.style.borderTop="1px solid var(--border)"; row.style.padding="6px 0";
+    row.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center">
+      <div><b>${sp.name}</b>${sp.level===0?'<span class="badge cantrip">Cantrip</span>':''}${isBonus?'<span class="badge bonus">Bonus</span>':''}
+        <div class="muted" style="font-size:.85rem">${sp.level===0?"Zaubertrick":"Stufe "+sp.level} • ${sp.school||""}</div></div>
+      <div style="display:flex;gap:6px;align-items:center">
+        ${sp.level>0 && !isBonus?`<button class="btn btn-toggle">${isPrep?"Unvorbereiten":"Vorbereiten"}</button>`:""}
+        ${sp.level>0?`<button class="btn btn-bonus">${isBonus?"Bonus entfernen":"Bonus markieren"}</button>`:""}
+        <button class="btn btn-remove" title="Aus bekannten Zaubern entfernen">Entfernen</button>
+      </div></div>`;
+    const bt=row.querySelector(".btn-toggle"), bb=row.querySelector(".btn-bonus"), br=row.querySelector(".btn-remove");
+    if(bt) bt.addEventListener("click",()=>togglePrepared(sp.id));
+    if(bb) bb.addEventListener("click",()=>toggleBonus(sp.id));
+    if(br) br.addEventListener("click",()=>removeKnown(sp.id));
+    cont.appendChild(row);
+  });
+}
+
+/* =================== Features Page =================== */
+function buildFeaturesPage(){
+  const root=document.getElementById("features"); if(!root) return;
+  const reg=subclassDefinitionFor(character); const hasSub=!!character.subclass;
+  const subLabel=hasSub ? (settings.lang==="de"?character.subclass.nameDe:character.subclass.nameEn) : "–";
+  const items=character.featuresKnown.length
+    ? character.featuresKnown.map(fid=>{
+        const name=featureLabel(fid), short=featureText(fid);
+        return `<li><a href="#" data-feature="${fid}" style="text-decoration:none">${name}</a>
+          <div class="muted" style="font-size:.9rem">${short}</div></li>`;
+      }).join("")
+    : `<div class="muted">Noch keine Unterklassen-/Klassen‑Features bekannt.</div>`;
+  root.innerHTML=`
+    <div class="row">
+      <div class="col">
+        <div class="card">
+          <h2 style="margin-top:0">Unterklasse</h2>
+          <div>Typ: ${reg?.type||"–"}</div>
+          <div>Aktuell: <b>${subLabel}</b></div>
+          <div class="muted" style="margin-top:6px">Unterklassenwahl erfolgt im Level‑Up‑Dialog, wenn fällig.</div>
+        </div>
+        <div class="card">
+          <h2 style="margin-top:0">Features</h2>
+          ${character.featuresKnown.length?`<ul style="margin:0;padding-left:18px">${items}</ul>`:items}
+        </div>
+      </div>
+      <div class="col">
+        <div class="card">
+          <h2 style="margin-top:0">Aussehen & Persönlichkeit</h2>
+          <div class="grid2">
+            <label>Aussehen<br/><textarea id="bgAppearance" rows="4"></textarea></label>
+            <label>Ideale<br/><textarea id="bgIdeals" rows="4"></textarea></label>
+            <label>Bindungen<br/><textarea id="bgBonds" rows="4"></textarea></label>
+            <label>Makel<br/><textarea id="bgFlaws" rows="4"></textarea></label>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  const map=[["bgAppearance","appearance"],["bgIdeals","ideals"],["bgBonds","bonds"],["bgFlaws","flaws"]];
+  map.forEach(([id,key])=>{const t=document.getElementById(id); if(t){t.value=character.background[key]||""; t.addEventListener("input",()=>{character.background[key]=t.value; saveAll();});}});
+  root.querySelectorAll('a[data-feature]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault(); showFeature(a.dataset.feature);}));
+}
+
+/* =================== Settings Page =================== */
+function buildSettingsPage(){
+  const root=document.getElementById("settings"); if(!root) return;
+  root.innerHTML=`
+    <div class="card">
+      <h2 style="margin-top:0">Einstellungen</h2>
+      <div class="grid2">
+        <label>Sprache<br/>
+          <select id="langSelect"><option value="de">Deutsch</option><option value="en">English</option></select>
+        </label>
+        <label>Theme<br/>
+          <select id="themeSelect"><option value="dark">Dunkel</option><option value="light">Hell</option><option value="parchment">Pergament</option></select>
+        </label>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" id="btnReset">Auf Standard zurücksetzen</button>
+      </div>
+    </div>
+    <div class="card" id="proficiencyCard"></div>
+  `;
+  const langSel=document.getElementById("langSelect"), themeSel=document.getElementById("themeSelect");
+  langSel.value=settings.lang||"de"; themeSel.value=settings.theme||"dark";
+  langSel.addEventListener("change",()=>{settings.lang=langSel.value; saveAll(); renderSkills(); buildFeaturesPage();});
+  themeSel.addEventListener("change",()=>{settings.theme=themeSel.value; applyTheme(); saveAll();});
+  document.getElementById("btnReset").addEventListener("click",()=>{localStorage.removeItem("dnd_settings_v1");localStorage.removeItem("dnd_character_v1");location.reload();});
+  buildProficiencyCard();
+}
+function buildProficiencyCard(){
+  const card=document.getElementById("proficiencyCard"); if(!card) return;
+  let html=`<h2 style="margin-top:0">Übungsbonus – Auswahl</h2><div class="grid2"><div><h3>Skills</h3>`;
+  SKILLS.forEach(sk=>{const checked=character.proficiencySkills.includes(sk.id)?"checked":""; const label=skillLabel(sk);
+    html+=`<label style="display:block;margin-bottom:4px;"><input type="checkbox" class="prof-skill" value="${sk.id}" ${checked}/> ${label} <span class="muted">(${sk.ability})</span></label>`;
+  });
+  html+=`</div><div><h3>Rettungswürfe</h3>`;
+  ABILITIES.forEach(ab=>{const checked=character.proficiencySaves.includes(ab)?"checked":""; html+=`<label style="display:block;margin-bottom:4px;"><input type="checkbox" class="prof-save" value="${ab}" ${checked}/> ${ab}</label>`;});
+  html+=`</div></div>`; card.innerHTML=html;
+
+  card.querySelectorAll(".prof-skill").forEach(cb=>cb.addEventListener("change",()=>{const id=cb.value;const set=new Set(character.proficiencySkills);set.has(id)?set.delete(id):set.add(id);character.proficiencySkills=[...set];saveAll();renderSkills();}));
+  card.querySelectorAll(".prof-save").forEach(cb=>cb.addEventListener("change",()=>{const ab=cb.value;const set=new Set(character.proficiencySaves);set.has(ab)?set.delete(ab):set.add(ab);character.proficiencySaves=[...set];saveAll();renderSaves();}));
+}
+
+/* =================== Feature‑Detail Modal =================== */
+function showFeature(fid){
+  const f=FEATURES[fid]; const panel=document.getElementById("featurePanel");
+  if(!panel) return;
+  if(!f){ panel.innerHTML=`<h3>Unbekanntes Feature</h3><div class="muted">Kein Eintrag gefunden.</div><div style="text-align:right;margin-top:12px"><button class="btn" id="featureClose">Schließen</button></div>`; }
+  else{
+    const name=settings.lang==="de"?(f.nameDe||f.nameEn):(f.nameEn||f.nameDe);
+    const desc=settings.lang==="de"?(f.longDe||f.textDe||f.longEn||f.textEn||""):(f.longEn||f.textEn||f.longDe||f.textDe||"");
+    panel.innerHTML=`<h3 style="margin-top:0">${name}</h3><div style="white-space:pre-wrap;line-height:1.35">${desc}</div><div style="text-align:right;margin-top:12px"><button class="btn" id="featureClose">Schließen</button></div>`;
+  }
+  const modal=document.getElementById("featureModal"); if(modal){ modal.classList.add("open"); modal.querySelector("#featureClose").addEventListener("click",()=>modal.classList.remove("open")); }
+}
+
+/* =================== Level‑Up =================== */
+function buildLevelUpSummaryHTML(prevChar,nextLevel){
+  const cls=ALL_CLASSES.find(c=>c.id===prevChar.classId), primary=cls?.primary||"INT";
+  const pbPrev=profBonus(prevChar.level), pbNext=profBonus(nextLevel);
+  const prevLimit=Math.max(1,mod(prevChar.abilities[primary])+prevChar.level);
+  const nextLimit=Math.max(1,mod(prevChar.abilities[primary])+nextLevel);
+  const prevSlots=getSlotsFor(prevChar), nextSlots=getSlotsFor({...prevChar,level:nextLevel});
+  const pact=(cls?.spellcasting==="pact");
+  const slotLines=(function(){
+    const lines=[];
+    if(pact){const a=prevSlots[0]||0,b=nextSlots[0]||0;if(a!==b)lines.push(`Pakt‑Slots: ${a} → ${b}`);return lines;}
+    const n=Math.max(prevSlots.length,nextSlots.length);
+    for(let i=0;i<n;i++){const a=prevSlots[i]||0,b=nextSlots[i]||0;if(a!==b)lines.push(`Stufe ${i+1} Slots: ${a} → ${b}`);} return lines;
+  })();
+  const ASI_LEVELS=[4,8,12,16,19]; const gotASI=ASI_LEVELS.includes(nextLevel);
+  const NEW_SPELLS={wizard:2,bard:2,sorcerer:1,warlock:0,cleric:0,druid:0,paladin:1,ranger:1};
+  const maxPick=NEW_SPELLS[cls?.id]??0; const maxSpellLevel=nextSlots.length||0;
+  const items=[];
+  if(pbNext!==pbPrev) items.push(`Proficiency Bonus: ${pbPrev>=0?"+":""}${pbPrev} → ${pbNext>=0?"+":""}${pbNext}`);
+  if(slotLines.length) items.push(...slotLines);
+  if(nextLimit!==prevLimit) items.push(`Vorbereitungs‑Limit: ${prevLimit} → ${nextLimit}`);
+  items.push(maxPick>0?`Neue Zauber wählen: max ${maxPick} (bis Zauberstufe ${maxSpellLevel})`:`Diese Klasse lernt beim Level‑Up keine neuen Zauber.`);
+  if(gotASI) items.push(`Attributsverbesserung/Feat verfügbar (ASI).`);
+  items.push(`<span id="luHPline" class="muted">HP: wähle Wurf oder Fixwert…</span>`);
+  return `<ul style="margin:0;padding-left:18px">${items.map(li=>`<li>${li}</li>`).join("")}</ul>`;
+}
+let luPicked=new Set(); let luHPResult=null;
+function buildLevelUpModal(){
+  const panel=document.getElementById("levelupPanel"); if(!panel) return;
+  panel.innerHTML=`
+    <h3>Level Up</h3>
+    <div class="grid2">
+      <div class="card">
+        <div>Aktuelles Level: <b id="curLevel">1</b></div>
+        <div>Neues Level: <b id="newLevel">2</b></div>
+        <div style="margin-top:8px">
+          <button class="btn" id="btnRollHP">Trefferpunkte würfeln</button>
+          <button class="btn" id="btnFixedHP">Fix + CON‑Mod</button>
+        </div>
+        <div id="hpResult" class="muted" style="margin-top:6px"></div>
+      </div>
+      <div class="card">
+        <div id="newSpellsHeader" class="muted">Neue Zauber wählen</div>
+        <div id="newSpells" style="max-height:40vh;overflow:auto"></div>
+        <div class="muted" id="pickInfo" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="card" id="subclassChooser" style="display:none">
+      <h3 style="margin-top:0">Unterklasse wählen</h3>
+      <div id="subclassOptions"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Was ist neu?</h3>
+      <div id="luSummary" class="muted"></div>
+    </div>
+    <div style="margin-top:10px;display:flex;justify-content:space-between">
+      <button class="btn" id="btnCancelLU">Abbrechen</button>
+      <button class="btn" id="btnApplyLU">Anwenden</button>
+    </div>`;
+  document.getElementById("btnCancelLU").addEventListener("click",()=>document.getElementById("levelupModal").classList.remove("open"));
+  document.getElementById("btnRollHP").addEventListener("click",()=>rollHP(true));
+  document.getElementById("btnFixedHP").addEventListener("click",()=>rollHP(false));
+  document.getElementById("btnApplyLU").addEventListener("click",applyLevelUp);
+}
+function openLevelUp(){
+  const modal=document.getElementById("levelupModal"); if(!modal) return;
+  luPicked=new Set(); luHPResult=null;
+  buildLevelUpModal(); // ensure fresh panel each open
+  document.getElementById("curLevel").textContent=character.level;
+  document.getElementById("newLevel").textContent=character.level+1;
+
+  const cls=ALL_CLASSES.find(c=>c.id===character.classId);
+  const NEW_SPELLS={wizard:2,bard:2,sorcerer:1,warlock:0,cleric:0,druid:0,paladin:1,ranger:1}; const maxPick=NEW_SPELLS[cls.id]??0;
+  const nextLevel=character.level+1; const maxSpellLevel=(getSlotsFor({...character,level:nextLevel}).length)||0;
+
+  const list=document.getElementById("newSpells"); const pickInfo=document.getElementById("pickInfo");
+  document.getElementById("newSpellsHeader").textContent=maxPick?`Neue Zauber wählen (max ${maxPick}, bis Stufe ${maxSpellLevel})`:"Diese Klasse lernt beim Level‑Up keine neuen Zauber.";
+  list.innerHTML=""; pickInfo.textContent=`Gewählt 0 von ${maxPick}`;
+  if(maxPick>0){
+    const avail=allSpells.filter(s=>s.level>0&&s.level<=maxSpellLevel&&s.classes.includes(character.classId)&&!character.spellsKnown.includes(s.id))
+      .sort((a,b)=>(a.level-b.level)||a.name.localeCompare(b.name)).slice(0,120);
+    avail.forEach(sp=>{
+      const row=document.createElement("label"); row.style.display="flex"; row.style.justifyContent="space-between"; row.style.alignItems="center"; row.style.borderTop="1px solid #ccc"; row.style.padding="4px 0";
+      row.innerHTML=`<div><b>${sp.name}</b><div class="muted" style="font-size:.85rem">Stufe ${sp.level} • ${sp.school||""}</div></div><input type="checkbox"/>`;
+      const cb=row.querySelector("input");
+      cb.addEventListener("change",()=>{if(cb.checked){if(luPicked.size>=maxPick){cb.checked=false;return;}luPicked.add(sp.id);}else luPicked.delete(sp.id); pickInfo.textContent=`Gewählt ${luPicked.size} von ${maxPick}`;});
+      list.appendChild(row);
+    });
+  }
+
+  // Subclass chooser
+  (function(){
+    const reg=SUBCLASS_REGISTRY[character.classId]; const chooser=document.getElementById("subclassChooser"); const listEl=document.getElementById("subclassOptions");
+    if(reg && !character.subclass && nextLevel>=reg.chooseAtLevel){
+      chooser.style.display=""; listEl.innerHTML="";
+      Object.values(reg.options).forEach(opt=>{
+        const label=settings.lang==="de"?opt.nameDe:opt.nameEn;
+        const id=`subopt_${opt.key}`;
+        const row=document.createElement("label"); row.style.display="block"; row.style.marginBottom="6px";
+        row.innerHTML=`<input type="radio" name="subclass_pick" id="${id}" value="${opt.key}"> ${label}`;
+        listEl.appendChild(row);
+      });
+    }else chooser.style.display="none";
+  })();
+
+  // Summary + fresh features (clickable)
+  const fresh=newFeaturesForLevel(character,nextLevel);
+  const freshHtml = fresh.length
+    ? `<ul style="margin:0;padding-left:18px">${
+        fresh.map(fid=>`<li><a href="#" data-feature="${fid}" style="text-decoration:none"><b>${featureLabel(fid)}</b></a> — ${featureText(fid)}</li>`).join("")
+      }</ul>`
+    : `<div class="muted">Keine neuen Unterklassen/Klassen‑Features auf diesem Level.</div>`;
+  document.getElementById("luSummary").innerHTML = buildLevelUpSummaryHTML(character,nextLevel) + `<hr style="opacity:.3;margin:8px 0"/>` + freshHtml;
+  document.getElementById("luSummary").querySelectorAll('a[data-feature]').forEach(a=>{
+    a.addEventListener('click', (e)=>{ e.preventDefault(); showFeature(a.dataset.feature); });
+  });
+
+  modal.classList.add("open");
+}
+function rollHP(random=true){
+  const cls=ALL_CLASSES.find(c=>c.id===character.classId), die=cls?.hitDie||8;
+  const val=random? d(die)+mod(character.abilities.CON) : Math.ceil(die/2)+1+mod(character.abilities.CON);
+  const gain=Math.max(1,val); luHPResult={die,gain};
+  document.getElementById("hpResult").textContent=`HP +${gain} (d${die}${random?" gewürfelt":" Durchschnitt"})`;
+  const hpLine=document.getElementById("luHPline"); if(hpLine&&luHPResult){hpLine.outerHTML=`<span id="luHPline">HP: +${luHPResult.gain} (Max & aktuell steigen entsprechend)</span>`;}
+}
+function applyLevelUp(){
+  // Subklasse übernehmen
+  (function(){
+    const reg=SUBCLASS_REGISTRY[character.classId];
+    if(reg && !character.subclass){
+      const picked=document.querySelector('input[name="subclass_pick"]:checked');
+      if(picked){const opt=reg.options[picked.value]; character.subclass={id:`${character.classId}:${reg.type}:${opt.key}`,type:reg.type,key:opt.key,nameDe:opt.nameDe,nameEn:opt.nameEn};}
+    }
+  })();
+  // Level & HP
+  character.level+=1; if(luHPResult){character.hpMax+=luHPResult.gain; character.hp+=luHPResult.gain;}
+  // Neue Zauber
+  luPicked.forEach(id=>{if(!character.spellsKnown.includes(id)) character.spellsKnown.push(id);});
+  // Neue Features gutschreiben
+  const gained=newFeaturesForLevel(character,character.level); if(gained.length) character.featuresKnown=[...new Set([...character.featuresKnown,...gained])];
+  // Close & rerender
+  document.getElementById("levelupModal").classList.remove("open");
+  renderMeta(); renderSpellSlots(); updatePrepInfo(); renderKnownSpells(); buildFeaturesPage(); saveAll();
+}
+
+/* =================== Boot =================== */
+function boot(){
+  loadAll(); applyTheme();
+  setupTabs();
+  buildMainPage();
+  buildSpellsPage();
+  buildFeaturesPage();
+  buildSettingsPage();
+  renderMeta();
+}
+window.addEventListener("DOMContentLoaded", boot);
+</script>
+
+<!-- Lizenz-Hinweis (SRD 5.1) -->
+<!-- Portions of this work are derived from the SRD 5.1 by Wizards of the Coast LLC and available under the Creative Commons Attribution 4.0 International License. -->
+</body>
+</html>
